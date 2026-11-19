@@ -73,19 +73,33 @@ function confirmBox(msg, onOk) {
   $("#mOk").onclick = () => { closeModal(); onOk(); };
 }
 
+/* ============ 端标识（由后端按端口注入 index.html） ============ */
+const LOCKER_END = (window.LOCKER_END && window.LOCKER_END !== "__LOCKER_END__") ? window.LOCKER_END : "all";
+const END_DEFAULT = { u: "u-home", k: "k-standby", m: "m-login", all: "u-home" };
+const END_PREFIX = { u: "u-", k: "k-", m: "m-" };
+function defaultView() { return END_DEFAULT[LOCKER_END] || "u-home"; }
+function viewEnd(v) { return v.startsWith("k-") ? "kiosk" : v.startsWith("m-") ? "admin" : "user"; }
+function endAllowed(v) { return LOCKER_END === "all" || v.startsWith(END_PREFIX[LOCKER_END] || ""); }
+
 /* ============ 路由 ============ */
 const routes = {};
 function go(view) { location.hash = "#" + view; }
-function currentView() { return (location.hash || "#u-home").slice(1); }
+function currentView() { return (location.hash || "#" + defaultView()).slice(1); }
 window.addEventListener("hashchange", render);
 
 function render() {
   stopChatPoll();
-  const v = currentView();
-  const fn = routes[v] || routes["u-home"];
+  let v = currentView();
+  // 独立端口只允许访问本端页面，跨端 hash 自动回到本端首页
+  if (!endAllowed(v)) {
+    location.replace("#" + defaultView());
+    return;
+  }
+  const fn = routes[v] || routes[defaultView()];
   state._after = null;
   Promise.resolve(fn()).then((html) => {
     if (currentView() !== v) return;
+    $("#app").className = "end-" + viewEnd(v);
     $("#app").innerHTML = html || "";
     $("#app").dataset.view = v;
     window.scrollTo(0, 0);
@@ -121,6 +135,7 @@ document.addEventListener("click", (e) => {
     kioskStore: () => go("k-store"),
     kioskPickup: () => go("k-pickup"),
     kioskHome: () => go("k-standby"),
+    kioskTip: () => toast("请在用户端（手机端）完成选柜与支付下单"),
   };
   if (acts[act]) { e.preventDefault(); acts[act](); }
 });
@@ -582,18 +597,18 @@ routes["k-standby"] = async function () {
 };
 
 routes["k-store"] = async function () {
-  if (!requireLogin()) return "";
   const outlets = await api("/api/outlets?city=" + encodeURIComponent(state.city)).catch(() => []);
   const first = outlets[0];
   let cellsHtml = '<div class="faint tiny">暂无柜格数据</div>';
   if (first) {
+    // 使用公开接口 /api/outlets/{id} 的柜格统计，不再依赖后台 staff 权限接口
     const detail = await api("/api/outlets/" + first.id).catch(() => null);
-    if (detail) {
+    if (detail && detail.byStatus) {
+      const s = detail.byStatus;
       const cells = [];
-      for (const g of detail.groups || []) {
-        const ls = await api("/api/admin/lockers?outletId=" + detail.id + "&groupId=" + g.id).catch(() => []);
-        for (const l of ls) cells.push('<div class="lg-cell ' + (l.status === "occupied" ? "used" : l.status === "fault" ? "err" : "") + '" title="' + esc(l.code) + " " + statusName[l.status] + '"></div>');
-      }
+      for (let i = 0; i < (s.idle || 0); i++) cells.push('<div class="lg-cell" title="空闲"></div>');
+      for (let i = 0; i < (s.occupied || 0); i++) cells.push('<div class="lg-cell used" title="占用"></div>');
+      for (let i = 0; i < (s.fault || 0); i++) cells.push('<div class="lg-cell err" title="异常"></div>');
       if (cells.length) cellsHtml = cells.join("");
     }
   }
@@ -602,7 +617,7 @@ routes["k-store"] = async function () {
     '<div class="mono" style="font-size:12px;margin-top:10px">演示说明：柜机端引导用户到手机端下单；<br>下单成功后柜门自动弹开。</div></div>' +
     '<div class="section-h mt20"><b>本站柜格实时状态</b></div><div id="k-cells" class="locker-grid-mini mt10">' + cellsHtml + '</div>' +
     '<div class="section-h mt20"><b>附近网点</b></div>' + outlets.slice(0, 3).map((o) => '<div class="card mt8">' + esc(o.name) + " · 空闲 " + o.idle + " 格</div>").join("") +
-    '<button class="btn btn-primary mt20" data-action="nav" data-id="u-spec">去手机端下单（演示）</button></div></div>';
+    '<button class="btn btn-primary mt20" data-action="kioskTip">扫码后在手机端完成下单（演示）</button></div></div>';
 };
 
 routes["k-pickup"] = function () {
@@ -626,18 +641,25 @@ document.addEventListener("click", (e) => {
  *  管理后台
  * ================================================================ */
 const adminMenus = [
-  ["m-dash", "数据看板"], ["m-outlets", "网点管理"], ["m-monitor", "柜格监控"], ["m-rules", "收费规则"],
-  ["m-coupons", "优惠券"], ["m-orders", "订单管理"], ["m-revenue", "营收明细"], ["m-alerts", "异常告警"],
-  ["m-staff", "员工管理"], ["m-cs", "客服工作台"],
+  ["m-dash", "dashboard", "数据看板"], ["m-outlets", "outlets", "网点管理"], ["m-monitor", "monitor", "柜格监控"], ["m-rules", "rules", "收费规则"],
+  ["m-coupons", "coupons", "优惠券"], ["m-orders", "orders", "订单管理"], ["m-revenue", "revenue", "营收明细"], ["m-alerts", "alerts", "异常告警"],
+  ["m-staff", "staff", "员工管理"], ["m-cs", "cs", "客服工作台"],
 ];
+const MENU_KEY = Object.fromEntries(adminMenus.map(([view, key]) => [view, key]));
+// 后端返回菜单 id（dashboard/outlets/...），统一转换为前端视图 id（m-dash/...）
+function allowedViews(info) {
+  const raw = (info && info.menus) || [];
+  const mapped = adminMenus.filter(([, key]) => raw.includes(key)).map(([view]) => view);
+  return raw.includes("m-dash") || raw.some((x) => x.startsWith("m-")) ? raw : mapped;
+}
 function adminShell(active, body) {
   const info = state.adminInfo || JSON.parse(localStorage.getItem("locker_admin") || "null") || { name: "管理员", role: "", menus: [] };
-  const allowed = info.menus || [];
+  const allowed = allowedViews(info);
   return '<div class="admin-wrap"><div class="admin-side">' +
     '<div class="admin-logo">Smart-Locker 后台</div>' +
     '<div class="tiny faint" style="padding:0 16px">' + esc(info.name) + (info.role ? " · " + roleCn(info.role) : "") + '</div>' +
     adminMenus.filter((m) => allowed.includes(m[0])).map((m) =>
-      '<button class="admin-nav ' + (active === m[0] ? "on" : "") + '" data-action="adminNav" data-id="' + m[0] + '">' + esc(m[1]) + "</button>").join("") +
+      '<button class="admin-nav ' + (active === m[0] ? "on" : "") + '" data-action="adminNav" data-id="' + m[0] + '">' + esc(m[2]) + "</button>").join("") +
     '<button class="admin-nav" data-action="adminLogout" style="margin-top:auto">退出登录</button></div>' +
     '<div class="admin-main">' + body + "</div></div>";
 }
@@ -679,7 +701,7 @@ function adminGuard(view) {
   const raw = localStorage.getItem("locker_admin");
   if (!raw) { go("m-login"); return ""; }
   const info = JSON.parse(raw);
-  if (!(info.menus || []).includes(view)) return adminShell("m-dash", '<div class="card">无权限访问该模块</div>');
+  if (!allowedViews(info).includes(view)) return adminShell("m-dash", '<div class="card">无权限访问该模块</div>');
   return null;
 }
 
@@ -1029,5 +1051,6 @@ async function loadTickets(token) {
   });
 }
 
-/* 启动 */
+/* 启动：无 hash 时按端补齐默认视图（replaceState 不触发额外渲染） */
+if (!location.hash) history.replaceState(null, "", "#" + defaultView());
 render();

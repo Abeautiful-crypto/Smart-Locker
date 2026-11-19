@@ -1,3 +1,7 @@
+/* 原型 CSS 原样提取，统一封入 @layer proto。
+   SPA 自有样式（app.css）不分層，優先級永遠高於本層，
+   避免原型「設備外殼」(.phone/.kiosk) 與元件同名類污染三端頁面。 */
+@layer proto {
 :root{
   --bg:#F4EFE2; --bg-2:#E8E0CD; --surface:#FFFCF4;
   --ink:#1A1A17; --ink-2:#2A2924; --muted:#5E5A50; --faint:#8C877A;
@@ -376,3 +380,4 @@ tr:hover td{background:var(--accent-soft)}
 .modal-f{padding:12px 20px;border-top:2.5px solid var(--ink);display:flex;gap:8px;justify-content:flex-end}
 
 @media(max-width:900px){.stage{padding:12px}.viewport{min-height:auto;border-radius:12px}.scene-pick{max-width:140px}.brand small{display:none}.topbar{padding:0 12px;gap:10px}}
+} /* end @layer proto */

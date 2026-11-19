@@ -98,3 +98,65 @@
 .lg-cell.err { background: #fbc9c9; border-color: #c22727; }
 
 .cs-row:hover { background: var(--bg-2, #f4f4f2); }
+
+/* ==================================================================
+ * 三端容器与原型「设备外壳」隔离
+ * proto.css 已整体封入 @layer proto；本文件为非分层样式，优先级更高。
+ * 原型里的 .phone / .kiosk 是 340×700 手机壳、860×560 柜机壳，
+ * SPA 复用同名类时必须显式改回正常页面容器，否则三端全被塞进黑壳。
+ * #app 的类名由 app.js 的 render() 按当前视图前缀动态切换。
+ * ================================================================== */
+#app { width: 100%; min-height: 100vh; }
+
+/* 用户端：手机视图（居中窄栏 + 底部固定 tabbar） */
+#app.end-user {
+  max-width: 430px; margin: 0 auto; min-height: 100vh;
+  background: var(--bg); position: relative; padding-bottom: 66px;
+  box-shadow: 0 0 40px rgba(26, 26, 23, .08);
+}
+#app.end-user .tabbar {
+  position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: 430px; z-index: 50;
+}
+
+/* 柜机端：10.1 寸横屏，全屏深色 */
+#app.end-kiosk { min-height: 100vh; background: #111; }
+
+/* 管理后台：全屏数据视图 */
+#app.end-admin { min-height: 100vh; background: var(--bg); }
+
+/* 覆盖原型设备外壳同名类（.phone 已不用于 #app，保留兼容） */
+.phone {
+  width: 100%; max-width: none; height: auto; min-height: 100vh;
+  background: transparent; border-radius: 0; padding: 0;
+  box-shadow: none; flex: none;
+}
+.kiosk {
+  width: 100%; max-width: none; height: auto; min-height: 100vh;
+  margin: 0; border-radius: 0; padding: 36px 48px; box-shadow: none;
+  transform: none; background: #111; color: #fff;
+  display: flex; flex-direction: column;
+}
+.kiosk-idle {
+  height: auto; min-height: 100vh; padding: 36px 48px;
+  color: #fff; background: #111; position: relative; overflow: hidden;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center; text-align: center;
+}
+.kiosk-idle::before { opacity: .12; }
+
+/* 柜机端按钮放大，适配触屏 */
+#app.end-kiosk .k-btn { min-height: 64px; font-size: 22px; }
+#app.end-kiosk .k-big { font-size: 72px; }
+#app.end-kiosk .k-actions { gap: 24px; max-width: 720px; width: 100%; }
+
+/* .btn 默认撑满（原型口径），但 flex 行内必须自适应，
+   否则 width:100% 会把同一行的 .input.flex1 挤成一条细线（登录页验证码框） */
+.row > .btn { width: auto; flex: 0 0 auto; }
+.row > .btn.flex1 { width: auto; flex: 1 1 0; }
+.row > .input { min-width: 0; }
+
+/* 后台登录卡片居中于全屏（原型外壳移除后）。
+   .admin-wrap 是 flex 容器，默认 align-items:stretch 会把卡片拉满全屏高度 */
+.admin-wrap { min-height: 100vh; }
+.admin-login { margin: 12vh auto; align-self: flex-start; }
