@@ -444,6 +444,10 @@ func (s *Server) handleAdminLockerAction(w http.ResponseWriter, r *http.Request)
 		}
 		o, err := s.st.GetOrder(r.Context(), l.CurrentOrderID)
 		if err != nil {
+			// 回滚：释放已占用的新柜格
+			newLocker.Status = "idle"
+			newLocker.CurrentOrderID = 0
+			_ = s.st.UpdateLocker(r.Context(), newLocker)
 			writeErr(w, 500, "订单查询失败")
 			return
 		}
@@ -488,7 +492,12 @@ func (s *Server) handleAdminGetRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "查询失败")
 		return
 	}
-	writeJSON(w, 200, rule)
+	writeJSON(w, 200, map[string]any{
+		"outletId": rule.OutletID, "mode": rule.Mode,
+		"priceS": rule.PriceS, "priceM": rule.PriceM, "priceL": rule.PriceL,
+		"depositS": rule.DepositS, "depositM": rule.DepositM, "depositL": rule.DepositL,
+		"capS": rule.CapS, "capM": rule.CapM, "capL": rule.CapL, "freeMinutes": rule.FreeMinutes,
+	})
 }
 
 type ruleReq struct {
@@ -866,7 +875,7 @@ func (s *Server) handleAdminAlerts(w http.ResponseWriter, r *http.Request) {
 	for _, a := range alerts {
 		out = append(out, alertJSON(a))
 	}
-	writeJSON(w, 200, out)
+	writeJSON(w, 200, map[string]any{"alerts": out})
 }
 
 func (s *Server) handleAdminHandleAlert(w http.ResponseWriter, r *http.Request) {
@@ -1224,7 +1233,7 @@ func (s *Server) handleAdminTickets(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, m)
 	}
-	writeJSON(w, 200, out)
+	writeJSON(w, 200, map[string]any{"tickets": out})
 }
 
 type resolveReq struct {

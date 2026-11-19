@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -213,7 +212,12 @@ func (s *Server) handleOutletRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "查询失败")
 		return
 	}
-	writeJSON(w, 200, rule)
+	writeJSON(w, 200, map[string]any{
+		"outletId": rule.OutletID, "mode": rule.Mode,
+		"priceS": rule.PriceS, "priceM": rule.PriceM, "priceL": rule.PriceL,
+		"depositS": rule.DepositS, "depositM": rule.DepositM, "depositL": rule.DepositL,
+		"capS": rule.CapS, "capM": rule.CapM, "capL": rule.CapL, "freeMinutes": rule.FreeMinutes,
+	})
 }
 
 // ---------- 计费试算与下单 ----------
@@ -468,13 +472,14 @@ func (s *Server) handleOrderDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := orderJSON(o)
-	// 结算展示状态：no_due/due/refund/free/even
-	if o.Status == "finished" {
+	// 结算展示状态：no_due/due/refund/free（due 需补交时订单仍为进行中）
+	switch {
+	case o.ExtraFen > 0 && !o.ExtraPaid:
+		m["settleStatus"] = "due"
+	case o.Status == "finished":
 		switch {
 		case o.FeeFen == 0 && o.RefundFen > 0:
 			m["settleStatus"] = "free"
-		case o.ExtraFen > 0 && !o.ExtraPaid:
-			m["settleStatus"] = "due"
 		case o.RefundFen > 0:
 			m["settleStatus"] = "refund"
 		default:
@@ -623,6 +628,7 @@ func (s *Server) handlePickup(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// phoneOf 保留备用
 func phoneOf(c *UserClaims) string { return c.phone }
 
 var _ = phoneOf
@@ -782,7 +788,6 @@ func couponJSON(ci *store.CouponInstance, now time.Time) map[string]any {
 	switch d.Ctype {
 	case biz.CouponDiscount:
 		typeName = "折扣券"
-		valDesc = itoaCn(100-d.Value) + "折" // value=80 → 8折
 		valDesc = fmtFrac(d.Value)
 	case biz.CouponHour:
 		typeName = "时长券"
@@ -798,8 +803,6 @@ func couponJSON(ci *store.CouponInstance, now time.Time) map[string]any {
 		"status": ci.Status, "usable": usable, "note": d.Note,
 	}
 }
-
-func itoaCn(v int) string { return json.Number(intToString(v)).String() }
 
 func intToString(v int) string {
 	if v == 0 {

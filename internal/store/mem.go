@@ -103,11 +103,14 @@ func (m *MemStore) CreateStaff(_ context.Context, st *Staff) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, s := range m.staff {
-		if s.Account == st.Account {
+		if s.EmpNo == st.EmpNo || s.Account == st.Account || s.Phone == st.Phone {
 			return ErrConflict
 		}
 	}
 	st.ID = m.nextID()
+	if st.CreatedAt.IsZero() {
+		st.CreatedAt = time.Now()
+	}
 	m.staff[st.ID] = st
 	return nil
 }
@@ -393,6 +396,9 @@ func (m *MemStore) CreateOrder(_ context.Context, o *Order) error {
 		}
 	}
 	o.ID = m.nextID()
+	if o.CreatedAt.IsZero() {
+		o.CreatedAt = time.Now()
+	}
 	m.orders[o.ID] = o
 	return nil
 }
@@ -473,7 +479,7 @@ func (m *MemStore) CountOrdersBetween(_ context.Context, outletID int64, from, t
 	defer m.mu.Unlock()
 	n := 0
 	for _, o := range m.orders {
-		if !o.CreatedAt.Before(from) && o.CreatedAt.Before(to) {
+		if !o.CreatedAt.Before(from) && !o.CreatedAt.After(to) {
 			if outletID > 0 && o.OutletID != outletID {
 				continue
 			}
@@ -583,6 +589,9 @@ func (m *MemStore) CreateAlert(_ context.Context, a *Alert) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a.ID = m.nextID()
+	if a.CreatedAt.IsZero() {
+		a.CreatedAt = time.Now()
+	}
 	m.alerts[a.ID] = a
 	return nil
 }
@@ -633,6 +642,9 @@ func (m *MemStore) CreateTicket(_ context.Context, t *Ticket) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t.ID = m.nextID()
+	if t.CreatedAt.IsZero() {
+		t.CreatedAt = time.Now()
+	}
 	m.tickets[t.ID] = t
 	return nil
 }
@@ -754,6 +766,12 @@ func (m *MemStore) AddPayment(_ context.Context, p *Payment) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.payments = append(m.payments, p)
+	if p.ID == 0 {
+		p.ID = m.nextID()
+	}
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = time.Now()
+	}
 	return nil
 }
 
@@ -761,6 +779,9 @@ func (m *MemStore) AddRevenue(_ context.Context, r *RevenueRecord) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r.ID = m.nextID()
+	if r.CreatedAt.IsZero() {
+		r.CreatedAt = time.Now()
+	}
 	m.revenue = append(m.revenue, r)
 	return nil
 }
@@ -770,7 +791,7 @@ func (m *MemStore) ListRevenue(_ context.Context, outletID int64, from, to time.
 	defer m.mu.Unlock()
 	out := []*RevenueRecord{}
 	for _, r := range m.revenue {
-		if !r.CreatedAt.Before(from) && r.CreatedAt.Before(to) {
+		if !r.CreatedAt.Before(from) && !r.CreatedAt.After(to) {
 			if outletID > 0 && r.OutletID != outletID {
 				continue
 			}

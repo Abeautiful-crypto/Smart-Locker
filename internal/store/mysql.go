@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	mysqllib "github.com/go-sql-driver/mysql"
 )
 
 // MySQLStore 基于 MySQL 的存储实现
@@ -19,7 +20,15 @@ type MySQLStore struct {
 }
 
 // NewMySQL 打开 MySQL 连接并执行迁移与种子数据
-func NewMySQL(dsn string) (*MySQLStore, error) {
+// openDB 打开数据库连接并探活（强制会话时区 +08:00，避免服务器 UTC 导致 NOW() 偏移）
+func openDB(dsn string) (*sql.DB, error) {
+	if !strings.Contains(dsn, "time_zone=") {
+		if strings.Contains(dsn, "?") {
+			dsn += "&time_zone=%27%2B08%3A00%27"
+		} else {
+			dsn += "?time_zone=%27%2B08%3A00%27"
+		}
+	}
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, err
@@ -31,8 +40,15 @@ func NewMySQL(dsn string) (*MySQLStore, error) {
 		db.Close()
 		return nil, err
 	}
-	s := &MySQLStore{db: db}
-	return s, nil
+	return db, nil
+}
+
+func NewMySQL(dsn string) (*MySQLStore, error) {
+	db, err := openDB(dsn)
+	if err != nil {
+		return nil, err
+	}
+	return &MySQLStore{db: db}, nil
 }
 
 // Migrate 执行 migrations 目录下按文件名排序的 SQL（按语句拆分，幂等）。
@@ -89,6 +105,9 @@ func (s *MySQLStore) Close() error { return s.db.Close() }
 func (s *MySQLStore) CreateUser(ctx context.Context, phone string) (*User, error) {
 	res, err := s.db.ExecContext(ctx, "INSERT INTO users(phone) VALUES(?)", phone)
 	if err != nil {
+		if isDup(err) {
+			return nil, ErrConflict
+		}
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
@@ -117,6 +136,36 @@ func (s *MySQLStore) GetUserByID(ctx context.Context, id int64) (*User, error) {
 	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,created_at FROM users WHERE id=?", id))
 }
 
+// CreateLocker 新建柜格
+func (s *MySQLStore) CreateLocker(ctx context.Context, l *Locker) error {
+	res, err := s.db.ExecContext(ctx, "INSERT INTO lockers(outlet_id,group_id,code,size,status) VALUES(?,?,?,?,?)",
+		l.OutletID, l.GroupID, l.Code, l.Size, l.Status)
+	if err != nil {
+		if isDup(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	l.ID, _ = res.LastInsertId()
+	return nil
+}
+
+// isDup 判断是否唯一键冲突
+func isDup(err error) bool {
+	var me *mysqllib.MySQLError
+	if errors.As(err, &me) {
+		return me.Number == 1062
+	}
+	return false
+}
+
+// SeedKB 知识库种子（幂等）
+func (s *MySQLStore) SeedKB(category, keywords, answer string) {
+	_, _ = s.db.ExecContext(context.Background(),
+		"INSERT INTO kb_entries(category,keywords,answer) SELECT ?,?,? FROM DUAL WHERE NOT EXISTS(SELECT 1 FROM kb_entries WHERE category=?)",
+		category, keywords, answer, category)
+}
+
 // ---------- 员工 ----------
 
 const staffCols = "id,emp_no,account,name,phone,role,password_hash,status,IFNULL(scope_outlet_id,0),created_at"
@@ -138,6 +187,9 @@ func (s *MySQLStore) CreateStaff(ctx context.Context, st *Staff) error {
 		"INSERT INTO staff(emp_no,account,name,phone,role,password_hash,status,scope_outlet_id) VALUES(?,?,?,?,?,?,?,?)",
 		st.EmpNo, st.Account, st.Name, st.Phone, st.Role, st.PasswordHash, st.Status, nullableInt(st.ScopeOutletID))
 	if err != nil {
+		if isDup(err) {
+			return ErrConflict
+		}
 		return err
 	}
 	st.ID, _ = res.LastInsertId()
@@ -191,8 +243,14 @@ func (s *MySQLStore) UpdateStaffRole(ctx context.Context, id int64, role string)
 }
 
 func (s *MySQLStore) UpdateStaffStatus(ctx context.Context, id int64, status string) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE staff SET status=? WHERE id=?", status, id)
-	return err
+	res, err := s.db.ExecContext(ctx, "UPDATE staff SET status=? WHERE id=?", status, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *MySQLStore) UpdateStaffPassword(ctx context.Context, id int64, hash string) error {
@@ -256,9 +314,15 @@ func (s *MySQLStore) CreateOutlet(ctx context.Context, o *Outlet) error {
 }
 
 func (s *MySQLStore) UpdateOutlet(ctx context.Context, o *Outlet) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE outlets SET name=?,address=?,city=?,status=?,manager_staff_id=?,lat=?,lng=? WHERE id=?",
+	res, err := s.db.ExecContext(ctx, "UPDATE outlets SET name=?,address=?,city=?,status=?,manager_staff_id=?,lat=?,lng=? WHERE id=?",
 		o.Name, o.Address, o.City, o.Status, nullableInt(o.ManagerStaffID), o.Lat, o.Lng, o.ID)
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *MySQLStore) GetOutlet(ctx context.Context, id int64) (*Outlet, error) {
@@ -415,10 +479,16 @@ func (s *MySQLStore) AllocateLocker(ctx context.Context, outletID int64, size st
 }
 
 func (s *MySQLStore) UpdateLocker(ctx context.Context, l *Locker) error {
-	_, err := s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(ctx,
 		"UPDATE lockers SET status=?,fault_source=?,fault_note=?,current_order_id=? WHERE id=?",
 		l.Status, nullableStr(l.FaultSource), l.FaultNote, nullableInt0(l.CurrentOrderID), l.ID)
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ---------- 规则 ----------
@@ -440,7 +510,7 @@ func (s *MySQLStore) GetRule(ctx context.Context, outletID int64) (*Rule, error)
 
 func (s *MySQLStore) UpsertRule(ctx context.Context, r *Rule) error {
 	_, err := s.db.ExecContext(ctx,
-		"INSERT INTO outlet_rules("+ruleCols+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "+
+		"INSERT INTO outlet_rules("+ruleCols+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "+
 			"ON DUPLICATE KEY UPDATE mode=VALUES(mode),price_s=VALUES(price_s),price_m=VALUES(price_m),price_l=VALUES(price_l),"+
 			"deposit_s=VALUES(deposit_s),deposit_m=VALUES(deposit_m),deposit_l=VALUES(deposit_l),"+
 			"cap_s=VALUES(cap_s),cap_m=VALUES(cap_m),cap_l=VALUES(cap_l),free_minutes=VALUES(free_minutes)",
@@ -476,6 +546,9 @@ func (s *MySQLStore) CreateOrder(ctx context.Context, o *Order) error {
 		o.OrderNo, o.UserID, o.OutletID, o.LockerID, o.Size, o.PayMode, o.PrepaidFen, o.DepositFen, nullableInt0(o.CouponInstanceID),
 		o.CouponDiscountFen, o.Code, o.Status, o.StartedAt)
 	if err != nil {
+		if isDup(err) {
+			return ErrConflict
+		}
 		return err
 	}
 	o.ID, _ = res.LastInsertId()
@@ -567,14 +640,20 @@ func (s *MySQLStore) UpdateOrderSettlement(ctx context.Context, o *Order) error 
 	if !o.EndedAt.IsZero() {
 		ended = o.EndedAt
 	}
-	_, err := s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(ctx,
 		"UPDATE orders SET status=?,ended_at=?,fee_fen=?,refund_fen=?,extra_fen=?,extra_paid=?,settle_note=?,coupon_discount_fen=?,pickup_method=? WHERE id=?",
 		o.Status, ended, o.FeeFen, o.RefundFen, o.ExtraFen, o.ExtraPaid, o.SettleNote, o.CouponDiscountFen, o.PickupMethod, o.ID)
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *MySQLStore) CountOrdersBetween(ctx context.Context, outletID int64, from, to time.Time) (int, error) {
-	q := "SELECT COUNT(*) FROM orders WHERE created_at>=? AND created_at<?"
+	q := "SELECT COUNT(*) FROM orders WHERE created_at>=? AND created_at<=?"
 	var args []any = []any{from, to}
 	if outletID > 0 {
 		q += " AND outlet_id=?"
@@ -638,8 +717,14 @@ func (s *MySQLStore) ListCouponDefs(ctx context.Context) ([]*CouponDef, error) {
 }
 
 func (s *MySQLStore) SetCouponEnabled(ctx context.Context, id int64, enabled bool) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE coupon_defs SET enabled=? WHERE id=?", enabled, id)
-	return err
+	res, err := s.db.ExecContext(ctx, "UPDATE coupon_defs SET enabled=? WHERE id=?", enabled, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *MySQLStore) CreateCouponInstance(ctx context.Context, ci *CouponInstance) error {
@@ -843,8 +928,14 @@ func (s *MySQLStore) UpdateTicket(ctx context.Context, t *Ticket) error {
 	if !t.ResolvedAt.IsZero() {
 		resolved = t.ResolvedAt
 	}
-	_, err := s.db.ExecContext(ctx, "UPDATE tickets SET status=?,reply=?,resolved_at=? WHERE id=?", t.Status, t.Reply, resolved, t.ID)
-	return err
+	res, err := s.db.ExecContext(ctx, "UPDATE tickets SET status=?,reply=?,resolved_at=? WHERE id=?", t.Status, t.Reply, resolved, t.ID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ---------- 知识库 ----------
@@ -973,7 +1064,7 @@ func scanRevenue(rows *sql.Rows) ([]*RevenueRecord, error) {
 }
 
 func (s *MySQLStore) ListRevenue(ctx context.Context, outletID int64, from, to time.Time) ([]*RevenueRecord, error) {
-	q := "SELECT " + revenueCols + " FROM revenue_records WHERE created_at>=? AND created_at<?"
+	q := "SELECT " + revenueCols + " FROM revenue_records WHERE created_at>=? AND created_at<=?"
 	var args []any = []any{from, to}
 	if outletID > 0 {
 		q += " AND outlet_id=?"
@@ -989,7 +1080,7 @@ func (s *MySQLStore) ListRevenue(ctx context.Context, outletID int64, from, to t
 }
 
 func (s *MySQLStore) SumRevenue(ctx context.Context, outletID int64, from, to time.Time) (income, refund, extra int, err error) {
-	q := "SELECT kind, IFNULL(SUM(amount_fen),0) FROM revenue_records WHERE created_at>=? AND created_at<?"
+	q := "SELECT kind, IFNULL(SUM(amount_fen),0) FROM revenue_records WHERE created_at>=? AND created_at<=?"
 	var args []any = []any{from, to}
 	if outletID > 0 {
 		q += " AND outlet_id=?"

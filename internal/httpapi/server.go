@@ -3,11 +3,11 @@ package httpapi
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
@@ -103,12 +103,16 @@ func tokenFrom(r *http.Request) string {
 }
 
 func newToken() string {
-	now := time.Now().UnixNano()
-	h := sha256.Sum256([]byte(fmt.Sprintf("%d-%d", now, time.Now().UnixNano()<<3)))
+	b := make([]byte, 24)
+	_, _ = cryptoRand.Read(b)
+	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:32])
 }
 
 var errUnauthorized = errors.New("未登录或登录已失效")
+
+// cryptoRand 随机源
+var cryptoRand = rand.Reader
 
 // authUser 用户端鉴权
 func (s *Server) authUser(r *http.Request) (*UserClaims, error) {
