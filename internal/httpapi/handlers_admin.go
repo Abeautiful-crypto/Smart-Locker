@@ -1120,7 +1120,7 @@ func (s *Server) handleAdminCSSessions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, err.Error())
 		return
 	}
-	if err := s.requireRole(claims, "service"); err != nil {
+	if err := s.requireRole(claims, "service", "super"); err != nil {
 		writeErr(w, 403, err.Error())
 		return
 	}
@@ -1155,7 +1155,7 @@ func (s *Server) handleAdminCSMessages(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, err.Error())
 		return
 	}
-	if err := s.requireRole(claims, "service"); err != nil {
+	if err := s.requireRole(claims, "service", "super"); err != nil {
 		writeErr(w, 403, err.Error())
 		return
 	}
@@ -1211,7 +1211,7 @@ func (s *Server) handleAdminTickets(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, err.Error())
 		return
 	}
-	if err := s.requireRole(claims, "service"); err != nil {
+	if err := s.requireRole(claims, "service", "super"); err != nil {
 		writeErr(w, 403, err.Error())
 		return
 	}
