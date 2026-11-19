@@ -996,8 +996,8 @@ func (s *Server) handleAdminStaffRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Role    string `json:"role"`
-		OutletID int64 `json:"scopeOutletId"`
+		Role     string `json:"role"`
+		OutletID int64  `json:"scopeOutletId"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeErr(w, 400, "请求格式错误")

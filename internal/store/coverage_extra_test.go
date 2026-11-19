@@ -93,7 +93,7 @@ func TestMemCoverageExtras(t *testing.T) {
 	if _, err := m.GetCouponDef(ctx, 9999); err != ErrNotFound {
 		t.Fatal("GetCouponDef不存在应NotFound")
 	}
-	if ls, _ := m.ListCouponDefs(ctx, ); len(ls) < 1 {
+	if ls, _ := m.ListCouponDefs(ctx); len(ls) < 1 {
 		t.Fatal("券列表应非空")
 	}
 	ci := &CouponInstance{DefID: def.ID, UserID: 7, Status: "usable"}

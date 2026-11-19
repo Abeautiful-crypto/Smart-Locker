@@ -17,10 +17,10 @@ var ErrConflict = errors.New("conflict")
 var ErrNoFreeLocker = errors.New("no free locker")
 
 type User struct {
-	ID         int64
-	Phone      string
-	PickupPwd  string
-	CreatedAt  time.Time
+	ID        int64
+	Phone     string
+	PickupPwd string
+	CreatedAt time.Time
 }
 
 type Staff struct {
@@ -123,13 +123,13 @@ type CouponDef struct {
 }
 
 type CouponInstance struct {
-	ID           int64
-	DefID        int64
-	UserID       int64
-	Status       string // usable / used / expired
-	UsedOrderID  int64
-	CreatedAt    time.Time
-	Def          *CouponDef // 联查填充，可能为 nil
+	ID          int64
+	DefID       int64
+	UserID      int64
+	Status      string // usable / used / expired
+	UsedOrderID int64
+	CreatedAt   time.Time
+	Def         *CouponDef // 联查填充，可能为 nil
 }
 
 type Alert struct {

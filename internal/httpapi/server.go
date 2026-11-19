@@ -30,8 +30,8 @@ func New(st store.Store) *Server { return &Server{st: st} }
 
 // StaffClaims 员工会话信息
 type StaffClaims struct {
-	Staff   *store.Staff
-	Token   string
+	Staff *store.Staff
+	Token string
 }
 
 // UserClaims 用户会话信息

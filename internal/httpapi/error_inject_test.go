@@ -316,12 +316,12 @@ func newFailServer(t *testing.T) (*failStore, *httptest.Server) {
 }
 
 type injCase struct {
-	fail    string
-	method  string
-	path    string
-	body    map[string]any
-	token   string
-	want    int
+	fail   string
+	method string
+	path   string
+	body   map[string]any
+	token  string
+	want   int
 }
 
 func TestInjectedErrors(t *testing.T) {

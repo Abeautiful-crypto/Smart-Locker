@@ -401,7 +401,7 @@ func orderJSON(o *store.Order) map[string]any {
 		"couponInstanceId": o.CouponInstanceID, "couponDiscount": o.CouponDiscountFen,
 		"code": o.Code, "status": o.Status,
 		"startedAt": o.StartedAt.Format(time.RFC3339),
-		"fee": o.FeeFen, "refund": o.RefundFen, "extra": o.ExtraFen, "extraPaid": o.ExtraPaid,
+		"fee":       o.FeeFen, "refund": o.RefundFen, "extra": o.ExtraFen, "extraPaid": o.ExtraPaid,
 		"settleNote": o.SettleNote, "pickupMethod": o.PickupMethod,
 	}
 	if !o.EndedAt.IsZero() {

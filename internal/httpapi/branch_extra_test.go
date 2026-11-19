@@ -19,14 +19,14 @@ func TestMoreBranches(t *testing.T) {
 	oid := outletIDOf(t, ts)
 
 	// 网点管理员访问超管专属接口 → 403
-	call(t, ts, "GET", "/api/admin/rules/1", siteTk, nil)                       // 403
-	call(t, ts, "PUT", "/api/admin/rules/1", siteTk, map[string]any{})          // 403
-	call(t, ts, "GET", "/api/admin/coupons", siteTk, nil)                       // 403
-	call(t, ts, "GET", "/api/admin/staff", siteTk, nil)                         // 403
+	call(t, ts, "GET", "/api/admin/rules/1", siteTk, nil)              // 403
+	call(t, ts, "PUT", "/api/admin/rules/1", siteTk, map[string]any{}) // 403
+	call(t, ts, "GET", "/api/admin/coupons", siteTk, nil)              // 403
+	call(t, ts, "GET", "/api/admin/staff", siteTk, nil)                // 403
 	// 网点管理员本网点数据（缺省 outletId 用 scope）
-	call(t, ts, "GET", "/api/admin/lockers", siteTk, nil)                       // 200
-	call(t, ts, "GET", "/api/admin/orders", siteTk, nil)                        // 200
-	call(t, ts, "GET", "/api/admin/alerts", siteTk, nil)                        // 200
+	call(t, ts, "GET", "/api/admin/lockers", siteTk, nil) // 200
+	call(t, ts, "GET", "/api/admin/orders", siteTk, nil)  // 200
+	call(t, ts, "GET", "/api/admin/alerts", siteTk, nil)  // 200
 	// 营收导出（site_admin）
 	code, _ := call(t, ts, "GET", "/api/admin/revenue/export", siteTk, nil)
 	if code != 200 {
@@ -62,8 +62,8 @@ func TestMoreBranches(t *testing.T) {
 
 	// 无订单用户各取件方式 → 400
 	tk2 := login(t, ts, "13900009401")
-	call(t, ts, "POST", "/api/orders/1/pickup", tk2, map[string]any{"method": "scan"})         // 400 无订单
-	call(t, ts, "POST", "/api/orders/1/pickup", tk2, map[string]any{"method": "face"})        // 400 无订单
+	call(t, ts, "POST", "/api/orders/1/pickup", tk2, map[string]any{"method": "scan"})                      // 400 无订单
+	call(t, ts, "POST", "/api/orders/1/pickup", tk2, map[string]any{"method": "face"})                      // 400 无订单
 	call(t, ts, "POST", "/api/orders/1/pickup", tk2, map[string]any{"method": "password", "password": "x"}) // 400 无订单
 	// 取件码长度不符
 	code, _ = call(t, ts, "POST", "/api/orders/1/pickup", tk2, map[string]any{"method": "code", "code": "12345"})

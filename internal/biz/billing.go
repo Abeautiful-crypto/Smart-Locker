@@ -186,12 +186,12 @@ const (
 
 // Settlement 结算结果
 type Settlement struct {
-	FeeFen     int    // 时长费用（已扣券）
-	CouponFen  int    // 券抵扣金额
-	RefundFen  int    // 应退金额
-	ExtraFen   int    // 应补交金额
-	Kind       string // free / refund / due / even
-	Note       string
+	FeeFen    int    // 时长费用（已扣券）
+	CouponFen int    // 券抵扣金额
+	RefundFen int    // 应退金额
+	ExtraFen  int    // 应补交金额
+	Kind      string // free / refund / due / even
+	Note      string
 }
 
 // Settle 订单结算：多退少补，优惠券在结束订单时结算。

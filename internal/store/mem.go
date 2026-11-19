@@ -822,15 +822,15 @@ func (m *MemStore) SumRevenue(_ context.Context, outletID int64, from, to time.T
 
 // ---------- clones ----------
 
-func cloneUser(u *User) *User                      { c := *u; return &c }
-func cloneStaff(s *Staff) *Staff                   { c := *s; return &c }
-func cloneOutlet(o *Outlet) *Outlet                { c := *o; return &c }
-func cloneLocker(l *Locker) *Locker                { c := *l; return &c }
-func cloneRule(r *Rule) *Rule                      { c := *r; return &c }
-func cloneOrder(o *Order) *Order                   { c := *o; return &c }
-func cloneCouponDef(d *CouponDef) *CouponDef       { c := *d; return &c }
-func cloneAlert(a *Alert) *Alert                   { c := *a; return &c }
-func cloneTicket(t *Ticket) *Ticket                { c := *t; return &c }
+func cloneUser(u *User) *User                { c := *u; return &c }
+func cloneStaff(s *Staff) *Staff             { c := *s; return &c }
+func cloneOutlet(o *Outlet) *Outlet          { c := *o; return &c }
+func cloneLocker(l *Locker) *Locker          { c := *l; return &c }
+func cloneRule(r *Rule) *Rule                { c := *r; return &c }
+func cloneOrder(o *Order) *Order             { c := *o; return &c }
+func cloneCouponDef(d *CouponDef) *CouponDef { c := *d; return &c }
+func cloneAlert(a *Alert) *Alert             { c := *a; return &c }
+func cloneTicket(t *Ticket) *Ticket          { c := *t; return &c }
 
 func cloneCouponInstance(ci *CouponInstance, defs map[int64]*CouponDef) *CouponInstance {
 	c := *ci
