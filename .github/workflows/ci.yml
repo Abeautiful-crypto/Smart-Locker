@@ -40,7 +40,18 @@ jobs:
           fi
 
       - name: 质量门禁（vet + test -race + 覆盖率≥85%）
-        run: bash scripts/check_coverage.sh 85
+        run: |
+          set +e
+          bash scripts/check_coverage.sh 85 > gate.log 2>&1
+          code=$?
+          cat gate.log
+          {
+            echo "### 质量门禁输出（exit=$code）"
+            echo '```'
+            cat gate.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $code
 
       - name: 前端语法检查
         run: node --check web/app.js
