@@ -8,3 +8,5 @@ coverage_merged.out
 cover
 tmp/
 tmp_*.log
+dist/
+shots/*.log
