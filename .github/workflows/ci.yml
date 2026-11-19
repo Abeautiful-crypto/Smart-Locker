@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "dev/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: gofmt 检查
+        run: |
+          UNFMT=$(gofmt -l cmd internal)
+          if [ -n "$UNFMT" ]; then
+            echo "以下文件未通过 gofmt："
+            echo "$UNFMT"
+            exit 1
+          fi
+
+      - name: 质量门禁（vet + test -race + 覆盖率≥85%）
+        run: bash scripts/check_coverage.sh 85
+
+      - name: 前端语法检查
+        run: node --check web/app.js
