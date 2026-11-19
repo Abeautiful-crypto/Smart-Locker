@@ -51,6 +51,9 @@ jobs:
             cat gate.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          tail -n 30 gate.log | while IFS= read -r l; do
+            [ -n "$l" ] && echo "::error title=gate-tail::$l"
+          done
           exit $code
 
       - name: 前端语法检查
