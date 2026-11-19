@@ -4,4 +4,7 @@
 smart_locker.db
 coverage.out
 coverage.html
+coverage_merged.out
+cover
 tmp/
+tmp_*.log
