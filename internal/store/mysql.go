@@ -20,8 +20,10 @@ type MySQLStore struct {
 }
 
 // NewMySQL 打开 MySQL 连接并执行迁移与种子数据
-// openDB 打开数据库连接并探活（强制会话时区 +08:00，避免服务器 UTC 导致 NOW() 偏移）
+// openDB 打开数据库连接并探活（驱动 loc 与会话时区统一固定 +08:00，
+// 避免服务器/运行机器为 UTC 时 NOW() 与驱动写入的墙钟错位 8 小时）
 func openDB(dsn string) (*sql.DB, error) {
+	dsn = strings.Replace(dsn, "loc=Local", "loc=Asia%2FShanghai", 1)
 	if !strings.Contains(dsn, "time_zone=") {
 		if strings.Contains(dsn, "?") {
 			dsn += "&time_zone=%27%2B08%3A00%27"
