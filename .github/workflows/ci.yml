@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "dev/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt 检查
+        run: |
+          UNFMT=$(gofmt -l cmd internal)
+          if [ -n "$UNFMT" ]; then
+            echo "以下文件未通过 gofmt："
+            echo "$UNFMT"
+            exit 1
+          fi
+
+      - name: 质量门禁（vet + test -race + 覆盖率≥85%）
+        run: |
+          set +e
+          bash scripts/check_coverage.sh 85 > gate.log 2>&1
+          code=$?
+          cat gate.log
+          {
+            echo "### 质量门禁输出（exit=$code）"
+            echo '```'
+            cat gate.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          tail -n 30 gate.log | while IFS= read -r l; do
+            [ -n "$l" ] && echo "::error title=gate-tail::$l"
+          done
+          exit $code
+
+      - name: 前端语法检查
+        run: node --check web/app.js

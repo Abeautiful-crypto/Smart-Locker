@@ -1,0 +1,1033 @@
+/* Smart-Locker 前端 SPA：用户端 / 柜机端 / 管理后台（vanilla JS，无框架） */
+"use strict";
+
+/* ============ 基础工具 ============ */
+const $ = (sel) => document.querySelector(sel);
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const yuan = (fen) => ((fen || 0) / 100).toFixed(2).replace(/\.00$/, "");
+const yuan2 = (fen) => ((fen || 0) / 100).toFixed(2);
+
+const I = {
+  back: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 5l-7 7 7 7"/></svg>',
+  pin: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.2-7-11a7 7 0 1 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>',
+  box: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M12 6v-3M9 6h6"/></svg>',
+  key: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="4"/><path d="M11 11l9 9M17 17l3-3"/></svg>',
+  list: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
+  user: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>',
+  chat: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/></svg>',
+  ticket: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 6v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-6z"/></svg>',
+};
+
+/* ============ API 客户端 ============ */
+async function api(path, method, body) {
+  const headers = { "Content-Type": "application/json" };
+  const tk = localStorage.getItem("locker_token");
+  if (tk) headers["X-Token"] = tk;
+  const resp = await fetch(path, { method: method || "GET", headers, body: body ? JSON.stringify(body) : undefined });
+  let data = null;
+  try { data = await resp.json(); } catch (e) { /* 空响应 */ }
+  if (!resp.ok) throw new Error((data && data.error) || ("HTTP " + resp.status));
+  return data;
+}
+
+/* ============ 状态 ============ */
+const state = {
+  city: "上海",
+  outlet: null,       // 当前网点详情
+  spec: null,         // 选中的柜型
+  payMode: "prepaid",
+  couponId: 0,
+  quote: null,
+  lastOrder: null,    // 下单结果
+  pickupCodeInput: "",
+  adminToken: null,
+  adminInfo: null,
+  chatAfter: 0,
+  chatTimer: null,
+};
+
+function saveToken(tk) { localStorage.setItem("locker_token", tk || ""); }
+function hasToken() { return !!localStorage.getItem("locker_token"); }
+
+/* ============ Toast / Modal ============ */
+function toast(msg, ms) {
+  const root = $("#toast-root");
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = msg;
+  root.appendChild(el);
+  setTimeout(() => el.remove(), ms || 2200);
+}
+function modal(html) {
+  const root = $("#modal-root");
+  root.innerHTML = '<div class="modal-mask"><div class="modal-box">' + html + '</div></div>';
+  root.querySelector(".modal-mask").addEventListener("click", (e) => {
+    if (e.target.classList.contains("modal-mask")) closeModal();
+  });
+}
+function closeModal() { $("#modal-root").innerHTML = ""; }
+function confirmBox(msg, onOk) {
+  modal('<div class="bold14">确认操作</div><div class="mt10 faint">' + esc(msg) + '</div>' +
+    '<div class="row gap10 mt16"><button class="btn flex1" id="mCancel">取消</button><button class="btn btn-primary flex1" id="mOk">确认</button></div>');
+  $("#mCancel").onclick = closeModal;
+  $("#mOk").onclick = () => { closeModal(); onOk(); };
+}
+
+/* ============ 路由 ============ */
+const routes = {};
+function go(view) { location.hash = "#" + view; }
+function currentView() { return (location.hash || "#u-home").slice(1); }
+window.addEventListener("hashchange", render);
+
+function render() {
+  stopChatPoll();
+  const v = currentView();
+  const fn = routes[v] || routes["u-home"];
+  state._after = null;
+  Promise.resolve(fn()).then((html) => {
+    if (currentView() !== v) return;
+    $("#app").innerHTML = html || "";
+    $("#app").dataset.view = v;
+    window.scrollTo(0, 0);
+    if (state._after) { const f = state._after; state._after = null; f(); }
+    if (v === "u-chat") startChatPoll();
+  }).catch((err) => {
+    if (currentView() === v) $("#app").innerHTML = '<div class="app-pad mt20"><div class="card">' + esc(err.message) + "</div></div>";
+    toast(err.message);
+  });
+}
+
+/* 事件委托：data-action */
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-action]");
+  if (!el) return;
+  const act = el.dataset.action;
+  const id = el.dataset.id;
+  const acts = {
+    nav: () => go(id),
+    back: () => history.back(),
+    city: () => openCityPicker(),
+    outlet: () => openOutletDetail(Number(id)),
+    spec: () => { if (!requireLogin()) return; go("u-spec"); },
+    paymode: () => { state.payMode = id; render(); },
+    coupon: () => chooseCoupon(Number(id) || 0),
+    couponSelect: () => go("u-coupon-select"),
+    report: () => reportProblem(Number(id)),
+    pickupMethod: () => go("u-pickup"),
+    openOutletMap: () => toast("地图为演示降级实现：显示网点列表"),
+    guide: () => go("u-guide"),
+    adminNav: () => go(id),
+    adminLogout: () => { localStorage.removeItem("locker_admin"); state.adminToken = null; go("m-login"); },
+    kioskStore: () => go("k-store"),
+    kioskPickup: () => go("k-pickup"),
+    kioskHome: () => go("k-standby"),
+  };
+  if (acts[act]) { e.preventDefault(); acts[act](); }
+});
+
+function requireLogin() {
+  if (hasToken()) return true;
+  toast("请先登录");
+  go("u-login");
+  return false;
+}
+
+function openCityPicker() {
+  api("/api/cities").then((cities) => {
+    modal('<div class="bold14 mb10">选择城市</div>' + cities.map((c) =>
+      '<button class="row btn city-opt" data-action="pickCity" data-id="' + esc(c.city) + '" style="justify-content:space-between;width:100%;margin-bottom:8px"><span>' + esc(c.city) + '</span><span class="faint tiny">空闲 ' + c.idle + ' 格</span></button>').join(""));
+    rootPickCity();
+  }).catch((err) => toast(err.message));
+}
+function rootPickCity() {
+  document.querySelectorAll("[data-action='pickCity']").forEach((b) => {
+    b.onclick = () => { state.city = b.dataset.id; closeModal(); render(); };
+  });
+}
+
+function openOutletDetail(id) {
+  api("/api/outlets/" + id).then((o) => { state.outlet = o; go("u-detail"); }).catch((err) => toast(err.message));
+}
+
+function chooseCoupon(cid) {
+  state.couponId = cid;
+  refreshQuote().then(() => render());
+}
+
+/* 计费试算 */
+async function refreshQuote() {
+  const rule = await api("/api/outlets/" + state.outlet.id + "/rule");
+  state.rule = rule;
+  state.quote = await api("/api/quote", "POST", { outletId: state.outlet.id, size: state.spec, payMode: state.payMode });
+}
+
+/* 上报柜格异常 */
+function reportProblem(orderId) {
+  const problems = ["柜门未弹开", "柜门无法关闭", "柜格内有异物", "柜格灯不亮", "其他问题"];
+  modal('<div class="bold14 mb10">选择问题类型</div>' + problems.map((p) =>
+    '<button class="row btn prob-opt" data-p="' + esc(p) + '" style="width:100%;margin-bottom:8px;justify-content:flex-start">' + esc(p) + '</button>').join("") +
+    '<div class="faint tiny mt10">提交后柜格将标记异常，订单关闭并全额退款</div>');
+  document.querySelectorAll(".prob-opt").forEach((b) => {
+    b.onclick = () => {
+      const p = b.dataset.p;
+      closeModal();
+      api("/api/orders/" + orderId + "/report", "POST", { problem: p }).then((r) => {
+        toast("已上报，退款 ¥" + yuan2(r.refund));
+        render();
+      }).catch((err) => toast(err.message));
+    };
+  });
+}
+
+/* ============ 图标/小组件 ============ */
+const sizeName = { S: "小格", M: "中格", L: "大格" };
+const statusName = { idle: "空闲", occupied: "占用", fault: "异常" };
+function statusChip(st) {
+  const map = { idle: "chip-ok", occupied: "chip-warn", fault: "chip-err" };
+  return '<span class="chip ' + (map[st] || "") + '">' + statusName[st] + "</span>";
+}
+
+/* ================================================================
+ *  用户端
+ * ================================================================ */
+function tabbar(active) {
+  return '<div class="tabbar">' +
+    '<button class="' + (active === "home" ? "on" : "") + '" data-action="nav" data-id="u-home">' + I.box + "<span>首页</span></button>" +
+    '<button class="' + (active === "orders" ? "on" : "") + '" data-action="nav" data-id="u-orders">' + I.list + "<span>订单</span></button>" +
+    '<button class="' + (active === "pickup" ? "on" : "") + '" data-action="nav" data-id="u-pickup">' + I.key + "<span>取件</span></button>" +
+    '<button class="' + (active === "mine" ? "on" : "") + '" data-action="nav" data-id="u-mine">' + I.user + "<span>我的</span></button>" +
+    "</div>";
+}
+function appHeader(title, backTo) {
+  return '<div class="app-header">' + (backTo ? '<button class="icon-btn" data-action="nav" data-id="' + backTo + '">' + I.back + "</button>" : "") + '<div class="ttl">' + esc(title) + "</div></div>";
+}
+
+routes["u-login"] = function () {
+  return appHeader("登录", "u-home") +
+    '<div class="app-pad"><div class="h2">手机号登录 / 注册</div>' +
+    '<div class="card mt16"><label class="lbl">手机号</label><input class="input" id="phone" maxlength="11" placeholder="请输入11位手机号" inputmode="numeric">' +
+    '<div class="row gap8 mt12"><input class="input flex1" id="code" maxlength="6" placeholder="验证码" inputmode="numeric"><button class="btn" id="sendCode">发送验证码</button></div>' +
+    '<label class="row gap8 mt20" style="font-size:12px;color:var(--muted);align-items:flex-start;cursor:pointer"><input type="checkbox" id="agreeChk" style="margin-top:2px"><span>我已阅读并同意 <span class="link" data-action="nav" data-id="u-guide">《用户协议》</span> 与《隐私政策》</span></label>' +
+    '<button class="btn btn-primary mt20" id="doLogin">登录 / 注册</button>' +
+    '<div class="faint tiny mt20" style="text-align:center">演示环境验证码固定为 1234</div></div></div>';
+};
+
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#sendCode")) {
+    const phone = $("#phone").value.trim();
+    api("/api/user/send-code", "POST", { phone }).then(() => toast("验证码已发送（演示：1234）")).catch((err) => toast(err.message));
+  }
+  if (e.target.closest("#doLogin")) {
+    const phone = $("#phone").value.trim();
+    const code = $("#code").value.trim();
+    const agree = $("#agreeChk").checked;
+    api("/api/user/login", "POST", { phone, code, agree }).then((r) => {
+      saveToken(r.token);
+      toast("登录成功");
+      go("u-home");
+    }).catch((err) => toast(err.message));
+  }
+});
+
+routes["u-home"] = async function () {
+  const cities = await api("/api/cities");
+  const outlets = await api("/api/outlets?city=" + encodeURIComponent(state.city));
+  const cur = cities.find((c) => c.city === state.city) || cities[0];
+  return appHeader("优小宝寄存") +
+    '<div class="app-pad">' +
+    '<div class="greeting"><div class="hi">欢迎使用智能寄存</div><div class="location" data-action="city" style="cursor:pointer">' + I.pin + " " + esc(cur.city) + ' <span class="faint tiny">切换 ›</span></div></div>' +
+    '<div class="hero-card"><div class="lbl">' + esc(cur.city) + ' · 空闲柜格</div><div class="big mono">' + cur.idle + ' <span style="font-size:14px;font-weight:600">格</span></div><div style="font-size:11.5px;opacity:.85">共 ' + outlets.length + ' 个网点可用</div></div>' +
+    '<div class="hero-actions"><button class="hero-act" data-action="spec"><div class="ic">' + I.box + '</div><b>立即存件</b><span>选柜型 · 在线支付</span></button>' +
+    '<button class="hero-act" data-action="nav" data-id="u-pickup"><div class="ic">' + I.key + '</div><b>我要取件</b><span>取件码 / 扫码 / 人脸</span></button></div>' +
+    '<div class="section"><div class="section-h"><b>附近网点</b><span class="link" data-action="nav" data-id="u-outlets">全部 ›</span></div>' +
+    outlets.slice(0, 3).map((o) => outletRow(o)).join("") + "</div>" +
+    '<div class="card mt12" data-action="nav" data-id="u-chat" style="display:flex;align-items:center;gap:11px;cursor:pointer"><div style="width:34px;height:34px;border-radius:10px;background:var(--bg-2);display:grid;place-items:center">' + I.chat + '</div>' +
+    '<div style="flex:1"><b style="font-size:12.5px">在线客服</b><div class="faint tiny">智能客服 7×24 · 人工 09:00-21:00</div></div><span class="link">进入 ›</span></div>' +
+    "</div>" + tabbar("home");
+};
+
+function outletRow(o) {
+  return '<div class="card outlet-row" data-action="outlet" data-id="' + o.id + '" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;cursor:pointer">' +
+    '<div style="min-width:0"><b style="font-size:13px">' + esc(o.name) + '</b><div class="faint tiny" style="margin-top:3px">' + esc(o.address || o.city) + "</div></div>" +
+    '<div style="text-align:right"><div class="mono" style="font-weight:700">空闲 ' + o.idle + '</div><div class="tiny faint">¥' + yuan(o.priceS) + "/时起</div></div></div>";
+}
+
+routes["u-outlets"] = async function () {
+  const outlets = await api("/api/outlets?city=" + encodeURIComponent(state.city)).catch(() => []);
+  state._after = () => {
+    const inp = $("#olSearch");
+    if (inp) inp.oninput = (e) => {
+      const kw = e.target.value.trim();
+      api("/api/outlets/search?q=" + encodeURIComponent(kw)).then((list) => {
+        const el = $("#olList");
+        if (el) el.innerHTML = list.map(outletRow).join("");
+      });
+    };
+  };
+  return appHeader("网点列表", "u-home") +
+    '<div class="app-pad"><input class="input" id="olSearch" placeholder="搜索网点名称 / 地址">' +
+    '<div id="olList" class="mt12">' + outlets.map(outletRow).join("") + "</div></div>" + tabbar("");
+};
+
+routes["u-detail"] = function () {
+  const o = state.outlet;
+  if (!o) { go("u-home"); return ""; }
+  const s = o.idleBySize || {};
+  return appHeader(o.name, "u-outlets") +
+    '<div class="app-pad"><div class="hero-card"><div class="lbl">' + esc(o.city) + " · " + esc(o.address) + '</div><div class="big mono">' + (s.S || 0) + "/" + (s.M || 0) + "/" + (s.L || 0) + ' <span style="font-size:13px">小/中/大 空闲</span></div></div>' +
+    '<div class="card mt12"><div class="bold14 mb10">柜格状态</div>' +
+    '<div class="row gap12" style="font-size:12px"><span>' + statusChip("idle") + " 空闲 " + (o.byStatus ? o.byStatus.idle : 0) + "</span><span>" + statusChip("occupied") + " 占用 " + (o.byStatus ? o.byStatus.occupied : 0) + "</span><span>" + statusChip("fault") + " 异常 " + (o.byStatus ? o.byStatus.fault : 0) + "</span></div></div>" +
+    '<div class="card mt12"><div class="bold14 mb10">收费规则</div><div class="pay-row"><span class="muted">小格</span><b>¥' + yuan2(o.priceS) + '/时 · 押金 ¥' + yuan2(1000) + '</b></div>' +
+    '<div class="pay-row"><span class="muted">中格</span><b>¥' + yuan2(o.priceM) + '/时 · 押金 ¥' + yuan2(2000) + '</b></div>' +
+    '<div class="pay-row" style="border:0"><span class="muted">大格</span><b>¥' + yuan2(o.priceL) + '/时 · 押金 ¥' + yuan2(3000) + "</b></div></div>" +
+    '<button class="btn btn-primary mt16" data-action="spec">立即存件</button></div>' + tabbar("");
+};
+
+routes["u-spec"] = async function () {
+  if (!requireLogin()) return "";
+  const o = state.outlet || (await api("/api/outlets?city=" + encodeURIComponent(state.city)).then((l) => l[0]));
+  if (!o) { toast("当前城市暂无可用网点"); return ""; }
+  state.outlet = o;
+  const detail = await api("/api/outlets/" + o.id);
+  state.outlet = detail;
+  const s = detail.idleBySize || {};
+  state._after = () => {
+    document.querySelectorAll(".spec-card").forEach((el) => { el.onclick = () => { state.spec = el.dataset.size; render(); }; });
+    document.querySelectorAll("input[name=pm]").forEach((el) => { el.onchange = () => { state.payMode = el.value; }; });
+    $("#toPay").onclick = async () => {
+      if (!state.spec) { toast("请选择柜型"); return; }
+      await refreshQuote();
+      go("u-pay");
+    };
+  };
+  return appHeader("选择柜型", "u-home") + '<div class="app-pad">' +
+    '<div class="h2">选择柜型与计费方式</div>' +
+    ["S", "M", "L"].map((k) =>
+      '<button class="card spec-card ' + (state.spec === k ? "on" : "") + '" data-size="' + k + '" style="width:100%;text-align:left;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">' +
+      '<div><b>' + sizeName[k] + '</b><div class="faint tiny mt5">空闲 ' + (s[k] || 0) + " 格</div></div>" +
+      '<div class="mono" style="font-weight:700">¥' + yuan2(detail["price" + k]) + "/时</div></button>").join("") +
+    '<div class="card mt12"><div class="bold14 mb10">计费方式</div>' +
+    '<label class="row gap8" style="margin-bottom:8px;cursor:pointer"><input type="radio" name="pm" value="prepaid" ' + (state.payMode === "prepaid" ? "checked" : "") + '><span>预付模式（1小时费用+押金，结束订单多退少补）</span></label>' +
+    '<label class="row gap8" style="cursor:pointer"><input type="radio" name="pm" value="deposit" ' + (state.payMode === "deposit" ? "checked" : "") + '><span>押金模式（先付押金，按实际时长扣费）</span></label></div>' +
+    '<button class="btn btn-primary mt16" id="toPay">去支付</button></div>' + tabbar("");
+};
+
+routes["u-pay"] = async function () {
+  const q = state.quote || {};
+  let coupons = [];
+  try { coupons = (await api("/api/user/coupons")).usable || []; } catch (e) { coupons = []; }
+  const sel = coupons.find((c) => c.id === state.couponId);
+  state._after = () => {
+    $("#doPay").onclick = async () => {
+      try {
+        const r = await api("/api/orders", "POST", { outletId: state.outlet.id, size: state.spec, payMode: state.payMode, couponInstanceId: state.couponId });
+        state.lastOrder = r;
+        go("u-open");
+      } catch (err) { toast(err.message); }
+    };
+  };
+  return appHeader("确认订单", "u-spec") +
+    '<div class="app-pad"><div class="h2">确认支付</div><div class="card mt16">' +
+    '<div class="pay-row"><span class="muted">寄存柜</span><b>' + esc(state.outlet ? state.outlet.name : "") + "</b></div>" +
+    '<div class="pay-row"><span class="muted">柜型</span><b>' + (sizeName[state.spec] || state.spec || "") + "</b></div>" +
+    '<div class="pay-row"><span class="muted">计费方式</span><b>' + (q.modeName || "") + "</b></div>" +
+    '<div class="pay-row"><span class="muted">单价 / 押金</span><b>¥' + yuan2(q.price) + " / 押金 ¥" + yuan2(q.deposit) + "</b></div>" +
+    (q.cap ? '<div class="pay-row"><span class="muted">24 小时封顶</span><b>¥' + yuan2(q.cap) + "</b></div>" : "") +
+    '<div class="pay-row"><span class="muted">免费时长</span><b>' + (q.freeMinutes || 0) + " 分钟</b></div>" +
+    '<button class="pay-row" data-action="couponSelect" style="width:100%;text-align:left"><span class="muted">优惠卡券</span><b class="link">' + (sel ? esc(sel.name) + "（结束订单时结算）" : "选择优惠券 ›") + "</b></button>" +
+    '<div class="pay-row" style="border:0"><span class="muted">' + esc(q.payName || "应付") + '</span><b class="price">¥' + yuan2(q.payNow) + "</b></div></div>" +
+    '<button class="btn btn-primary mt20" id="doPay">模拟支付 ¥' + yuan2(q.payNow) + "</button>" +
+    '<div class="faint tiny mt10" style="text-align:center">支付渠道为模拟实现，不产生真实扣款</div></div>';
+};
+
+routes["u-coupon-select"] = async function () {
+  let coupons = [];
+  try { coupons = (await api("/api/user/coupons")).usable || []; } catch (e) {}
+  state._after = () => {
+    $("#noCoupon").onclick = () => { state.couponId = 0; refreshQuote().then(() => go("u-pay")); };
+    document.querySelectorAll(".cp-card").forEach((el) => {
+      el.onclick = () => { state.couponId = Number(el.dataset.cid); refreshQuote().then(() => go("u-pay")); };
+    });
+  };
+  return appHeader("选择优惠券", "u-pay") +
+    '<div class="app-pad">' +
+    '<button class="card" id="noCoupon" style="width:100%;text-align:left;margin-bottom:10px">不使用优惠券</button>' +
+    (coupons.length ? coupons.map((c) =>
+      '<button class="card cp-card" data-cid="' + c.id + '" style="width:100%;text-align:left;margin-bottom:10px"><b>' + esc(c.name) + '</b><span class="chip chip-ok ml8">' + esc(c.type) + "</span>" +
+      '<div class="faint tiny mt5">' + esc(c.valueDesc) + " · " + esc(c.validFrom) + " ~ " + esc(c.validTo) + (c.scope === "outlet" ? " · 仅限指定网点" : " · 全网点通用") + "</div></button>").join("")
+      : '<div class="card mt12 faint">暂无可用优惠券</div>') + "</div>";
+};
+
+routes["u-open"] = function () {
+  const o = state.lastOrder;
+  if (!o) { go("u-home"); return ""; }
+  return appHeader("存件成功", "u-home") +
+    '<div class="app-pad" style="text-align:center"><div class="big-ok">柜门已弹开</div>' +
+    '<div class="card mt16"><div class="pay-row"><span class="muted">柜格</span><b class="mono">' + esc(o.lockerCode) + "</b></div>" +
+    '<div class="pay-row"><span class="muted">取件码</span><b class="mono" style="font-size:20px;letter-spacing:4px">' + esc(o.code) + "</b></div>" +
+    '<div class="pay-row"><span class="muted">支付金额</span><b>¥' + yuan2(o.paid) + "</b></div>" +
+    '<div class="pay-row" style="border:0"><span class="muted">下单时间</span><b>' + esc(o.startedAt.replace("T", " ").slice(0, 19)) + "</b></div></div>" +
+    '<div class="card mt12 faint tiny" style="line-height:1.9">请放入物品并关好柜门。取件码请妥善保管，也可在「订单」中查看。<br>柜门异常？在订单中可「上报柜格异常」，将全额退款。</div>' +
+    '<button class="btn btn-primary mt16" data-action="nav" data-id="u-orders">查看订单</button></div>';
+};
+
+routes["u-orders"] = async function () {
+  if (!requireLogin()) return "";
+  let cur = [], hist = [];
+  try { cur = await api("/api/orders/current"); hist = await api("/api/orders/history"); } catch (e) {}
+  return appHeader("我的订单", "u-home") + '<div class="app-pad">' +
+    (cur.length ? '<div class="section-h"><b>进行中</b></div>' + cur.map(orderCard).join("") : "") +
+    (hist.length ? '<div class="section-h mt16"><b>历史订单</b></div>' + hist.map(orderCard).join("") : "") +
+    (!cur.length && !hist.length ? '<div class="card mt16 faint">暂无订单，去首页寄存吧</div>' : "") +
+    "</div>" + tabbar("orders");
+};
+
+function orderCard(o) {
+  const active = o.status === "active";
+  return '<div class="card order-card" style="margin-bottom:10px">' +
+    '<div class="row" style="justify-content:space-between"><b>订单 ' + esc(o.orderNo) + "</b>" +
+    '<span class="chip ' + (active ? "chip-ok" : "") + '">' + (active ? "进行中" : "已结束") + "</span></div>" +
+    '<div class="faint tiny mt5">柜型 ' + sizeName[o.size] + " · " + (o.payMode === "deposit" ? "押金模式" : "预付模式") + (o.lockerCode ? " · 柜格 " + esc(o.lockerCode) : "") + "</div>" +
+    (active
+      ? '<div class="row gap8 mt10"><button class="btn flex1 op-pickup" data-oid="' + o.id + '">取件</button><button class="btn flex1 op-report" data-oid="' + o.id + '">上报柜格异常</button></div>'
+        + '<div class="row gap8 mt8"><button class="btn flex1 op-done" data-oid="' + o.id + '">已取出物品，关门结算</button></div>'
+      : '<div class="faint tiny mt8">费用 ¥' + yuan2(o.fee) + (o.refund ? " · 退款 ¥" + yuan2(o.refund) : "") + (o.extra ? " · 补交 ¥" + yuan2(o.extra) : "") + (o.couponDiscount ? " · 券抵 ¥" + yuan2(o.couponDiscount) : "") +
+        (o.settleNote ? "<br>" + esc(o.settleNote) : "") + "</div>") +
+    "</div>";
+}
+
+document.addEventListener("click", (e) => {
+  const pk = e.target.closest(".op-pickup");
+  if (pk) { state.pickOrderId = Number(pk.dataset.oid); go("u-pickup"); return; }
+  const rp = e.target.closest(".op-report");
+  if (rp) { reportProblem(Number(rp.dataset.oid)); return; }
+  const dn = e.target.closest(".op-done");
+  if (dn) {
+    const id = Number(dn.dataset.oid);
+    api("/api/orders/" + id + "/pickup-done", "POST", {}).then((r) => {
+      if (Number(r.extra) > 0) {
+        modal('<div class="bold14">需补交差额</div><div class="mt10">实际费用超出预付金额，需补交 <b class="price">¥' + yuan2(r.extra) + "</b></div><div class='faint tiny mt8'>" + esc(r.note) + "</div>" +
+          '<button class="btn btn-primary mt16" id="payExtra" style="width:100%">模拟补交支付</button>');
+        $("#payExtra").onclick = () => {
+          api("/api/orders/" + id + "/pay-extra", "POST", {}).then(() => { closeModal(); toast("补交完成，订单结束"); render(); }).catch((err) => toast(err.message));
+        };
+      } else {
+        toast("结算完成：" + (r.kind === "free" ? "免费时长内，全额退款 ¥" + yuan2(r.refund) : r.kind === "refund" ? "退款 ¥" + yuan2(r.refund) : "无需补退"));
+        render();
+      }
+    }).catch((err) => toast(err.message));
+  }
+});
+
+routes["u-pickup"] = function () {
+  return appHeader("取件", "u-home") +
+    '<div class="app-pad"><div class="h2">取件开柜</div>' +
+    '<div class="card mt16"><label class="lbl">取件码开柜</label><input class="input mono" id="pickCode" maxlength="6" placeholder="6位取件码" inputmode="numeric">' +
+    '<button class="btn btn-primary mt12" id="pickByCode" style="width:100%">开柜</button></div>' +
+    '<div class="card mt12"><div class="bold14 mb10">其他取件方式</div>' +
+    '<button class="btn" id="pickByScan" style="width:100%;margin-bottom:8px">手机扫码取件（默认）</button>' +
+    '<button class="btn" id="pickByFace" style="width:100%;margin-bottom:8px">人脸识别取件（演示）</button>' +
+    '<button class="btn" id="pickByPwd" style="width:100%">手机号+密码取件</button></div>' +
+    '<div id="pickResult"></div></div>';
+};
+
+document.addEventListener("click", (e) => {
+  const done = (r, oid) => {
+    $("#pickResult").innerHTML = '<div class="card mt12"><div class="big-ok">校验通过，柜门已弹开</div><div class="pay-row mt10"><span class="muted">柜格</span><b class="mono">' + esc(r.lockerCode) + '</b></div>' +
+      '<button class="btn btn-primary mt12" id="doneClose" style="width:100%">已取出物品，关门结算</button></div>';
+    $("#doneClose").onclick = () => finishPickup(oid || r.orderId);
+  };
+  if (e.target.closest("#pickByCode")) {
+    const code = $("#pickCode").value.trim();
+    api("/api/orders/0/pickup", "POST", { method: "code", code }).catch(async (err) => {
+      if (err.message.indexOf("订单不存在") === -1 && err.message.indexOf("404") === -1) throw err;
+    }).then((r) => { if (r) done(r); }).catch((err) => toast(err.message));
+  }
+  if (e.target.closest("#pickByScan")) {
+    api("/api/orders/0/pickup", "POST", { method: "scan" }).then((r) => done(r)).catch((err) => toast(err.message));
+  }
+  if (e.target.closest("#pickByFace")) {
+    api("/api/orders/0/pickup", "POST", { method: "face" }).then((r) => done(r)).catch((err) => toast(err.message));
+  }
+  if (e.target.closest("#pickByPwd")) {
+    modal('<div class="bold14 mb10">取件密码</div><input class="input" id="mPwd" type="password" placeholder="6位以上取件密码"><button class="btn btn-primary mt12" id="mPwdGo" style="width:100%">开柜</button>');
+    $("#mPwdGo").onclick = () => {
+      const pwd = $("#mPwd").value;
+      closeModal();
+      api("/api/orders/0/pickup", "POST", { method: "password", password: pwd }).then((r) => done(r)).catch((err) => toast(err.message));
+    };
+  }
+});
+
+async function finishPickup(orderId) {
+  const r = await api("/api/orders/" + orderId + "/pickup-done", "POST", {}).catch((err) => { toast(err.message); return null; });
+  if (!r) return;
+  if (Number(r.extra) > 0) {
+    modal('<div class="bold14">需补交差额</div><div class="mt10">需补交 <b class="price">¥' + yuan2(r.extra) + "</b></div>" +
+      '<button class="btn btn-primary mt16" id="payExtra2" style="width:100%">模拟补交支付</button>');
+    $("#payExtra2").onclick = async () => {
+      await api("/api/orders/" + orderId + "/pay-extra", "POST", {});
+      closeModal(); toast("补交完成，订单结束"); go("u-orders");
+    };
+  } else {
+    toast("结算完成：" + (r.kind === "free" ? "免费时长内，全额退款 ¥" + yuan2(r.refund) : r.kind === "refund" ? "退款 ¥" + yuan2(r.refund) : "无需补退"));
+    go("u-orders");
+  }
+}
+
+routes["u-mine"] = function () {
+  return appHeader("我的", "u-home") +
+    '<div class="app-pad"><div class="hero-card"><div class="lbl">已登录用户</div><div class="big">优惠券 · 取件密码 · 在线客服</div></div>' +
+    '<div class="card mt12"><div class="bold14">账户</div>' +
+    '<button class="pay-row" data-action="nav" data-id="u-coupons" style="width:100%;text-align:left"><span class="muted">优惠券</span><b class="link">查看 ›</b></button>' +
+    '<button class="pay-row" id="setPwd" style="width:100%;text-align:left"><span class="muted">取件密码</span><b class="link">设置 ›</b></button>' +
+    '<button class="pay-row" data-action="nav" data-id="u-chat" style="width:100%;text-align:left"><span class="muted">在线客服</span><b class="link">咨询 ›</b></button>' +
+    '<button class="pay-row" data-action="nav" data-id="m-login" style="width:100%;text-align:left;border:0"><span class="muted">员工后台入口</span><b class="link">前往 ›</b></button></div>' +
+    '<button class="btn mt16" id="doLogout" style="width:100%">退出登录</button></div>' + tabbar("mine");
+};
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#setPwd")) {
+    modal('<div class="bold14 mb10">设置取件密码</div><input class="input" id="mNewPwd" type="password" placeholder="至少6位"><button class="btn btn-primary mt12" id="mSetPwd" style="width:100%">保存</button>');
+    $("#mSetPwd").onclick = () => {
+      const pwd = $("#mNewPwd").value;
+      api("/api/user/pickup-pwd", "POST", { password: pwd }).then(() => { closeModal(); toast("保存成功"); }).catch((err) => toast(err.message));
+    };
+  }
+  if (e.target.closest("#doLogout")) {
+    api("/api/user/logout", "POST", {}).catch(() => {});
+    saveToken("");
+    toast("已退出");
+    go("u-login");
+  }
+});
+
+routes["u-coupons"] = async function () {
+  if (!requireLogin()) return "";
+  const data = await api("/api/user/coupons").catch(() => ({ usable: [], expired: [] }));
+  const card = (c, dead) =>
+    '<div class="card cp-card' + (dead ? " dead" : "") + '" style="margin-bottom:10px;opacity:' + (dead ? ".55" : "1") + '"><b>' + esc(c.name) + '</b><span class="chip chip-ok ml8">' + esc(c.type) + "</span>" +
+    '<div class="mt5 mono" style="font-weight:700">' + esc(c.valueDesc) + "</div>" +
+    '<div class="faint tiny mt5">' + (dead ? "已过期/停用 · " : "") + esc(c.validFrom) + " ~ " + esc(c.validTo) + " · " + (c.scope === "outlet" ? "限指定网点" : "全网点通用") + "</div></div>";
+  return appHeader("优惠券", "u-mine") + '<div class="app-pad">' +
+    '<div class="section-h"><b>可使用</b></div>' + (data.usable.map((c) => card(c, false)).join("") || '<div class="faint tiny">暂无</div>') +
+    '<div class="section-h mt16"><b>已过期</b></div>' + (data.expired.map((c) => card(c, true)).join("") || '<div class="faint tiny">暂无</div>') +
+    "</div>" + tabbar("");
+};
+
+routes["u-guide"] = function () {
+  return appHeader("用户协议与隐私政策", "u-login") +
+    '<div class="app-pad"><div class="card"><b>用户协议（摘要）</b><div class="faint mt8" style="line-height:1.9">1. 本平台提供智能寄存柜服务，按网点公示价格计费；<br>2. 免费时长内取件不产生费用；<br>3. 贵重物品与违禁品不得寄存；<br>4. 柜格异常请及时通过 App 上报。</div></div>' +
+    '<div class="card mt12"><b>隐私政策（摘要）</b><div class="faint mt8" style="line-height:1.9">1. 手机号仅用于登录与订单关联；<br>2. 人脸数据仅在本地演示环境模拟，不采集真实生物特征；<br>3. 订单数据用于计费与对账。</div></div></div>';
+};
+
+/* ---------- 在线客服：HTTP 轮询兜底 ---------- */
+function chatBubble(m) {
+  const who = m.sender === "user" ? "me" : m.sender === "agent" ? "agent" : "sys";
+  return '<div class="chat-bubble ' + who + '"><div class="tiny faint">' + (who === "me" ? "我" : who === "agent" ? "人工客服" : "系统") + " · " + esc(m.time) + "</div><div class='mt5'>" + esc(m.content) + "</div></div>";
+}
+routes["u-chat"] = async function () {
+  if (!requireLogin()) return "";
+  const st = await api("/api/chat/state").catch(() => ({ state: "bot", duty: false }));
+  state.chatAfter = 0;
+  state._after = () => {
+    pollChat();
+    $("#chatSend").onclick = sendChat;
+    $("#chatInput").onkeydown = (e) => { if (e.key === "Enter") sendChat(); };
+    $("#toHuman").onclick = () => api("/api/chat/transfer", "POST", {}).then(() => pollChat()).catch((err) => toast(err.message));
+  };
+  return appHeader("在线客服", "u-home") + '<div class="app-pad">' +
+    '<div class="card chat-status"><span class="chip ' + (st.duty ? "chip-ok" : "chip-warn") + '">' + (st.duty ? "人工在岗 09:00-21:00" : "人工已下班 · 工单次日处理") + '</span><span class="chip ml8">当前：' +
+    (st.state === "agent" ? "人工接待中" : st.state === "waiting" ? "排队等待人工" : "智能客服") + '</span>' +
+    '<button class="btn ml8" id="toHuman" style="flex:none">转人工</button></div>' +
+    '<div id="chatList" class="chat-list mt12"></div>' +
+    '<div class="row gap8 mt12"><input class="input flex1" id="chatInput" placeholder="输入问题…"><button class="btn btn-primary" id="chatSend">发送</button></div></div>';
+};
+function stopChatPoll() { if (state.chatTimer) { clearInterval(state.chatTimer); state.chatTimer = null; } }
+function startChatPoll() { if (!state.chatTimer) state.chatTimer = setInterval(pollChat, 3000); }
+async function pollChat() {
+  const list = $("#chatList");
+  if (!list) return;
+  const data = await api("/api/chat/messages?afterId=" + state.chatAfter).catch(() => null);
+  if (!data) return;
+  if (data.messages && data.messages.length) {
+    state.chatAfter = data.messages[data.messages.length - 1].id;
+    list.innerHTML += data.messages.map(chatBubble).join("");
+    list.scrollTop = list.scrollHeight;
+  }
+  const stc = document.querySelector(".chat-status .chip:last-of-type");
+  if (stc) stc.textContent = "当前：" + (data.state === "agent" ? "人工接待中" : data.state === "waiting" ? "排队等待人工" : "智能客服");
+}
+function sendChat() {
+  const input = $("#chatInput");
+  const content = input.value.trim();
+  if (!content) return;
+  input.value = "";
+  api("/api/chat/send", "POST", { content }).then((r) => {
+    if (r.ticket) toast("已生成工单 " + r.ticket);
+    pollChat();
+  }).catch((err) => toast(err.message));
+}
+
+/* ================================================================
+ *  柜机端（Kiosk 大屏）
+ * ================================================================ */
+routes["k-standby"] = async function () {
+  const cities = await api("/api/cities").catch(() => []);
+  const sh = cities.find((c) => c.city === state.city) || cities[0] || { idle: 0 };
+  return '<div class="kiosk kiosk-idle"><div class="k-logo">优小宝寄存</div>' +
+    '<div class="k-big mono">' + sh.idle + ' 格空闲</div>' +
+    '<div class="k-sub">' + esc(state.city) + ' · 人民广场站 2 号口 · 请选择服务</div>' +
+    '<div class="k-actions"><button class="k-btn" data-action="kioskStore">存 件</button><button class="k-btn k-btn-alt" data-action="kioskPickup">取 件</button></div>' +
+    '<div class="k-foot faint tiny">演示站点 · 数据与后端实时联动</div></div>';
+};
+
+routes["k-store"] = async function () {
+  if (!requireLogin()) return "";
+  const outlets = await api("/api/outlets?city=" + encodeURIComponent(state.city)).catch(() => []);
+  const first = outlets[0];
+  let cellsHtml = '<div class="faint tiny">暂无柜格数据</div>';
+  if (first) {
+    const detail = await api("/api/outlets/" + first.id).catch(() => null);
+    if (detail) {
+      const cells = [];
+      for (const g of detail.groups || []) {
+        const ls = await api("/api/admin/lockers?outletId=" + detail.id + "&groupId=" + g.id).catch(() => []);
+        for (const l of ls) cells.push('<div class="lg-cell ' + (l.status === "occupied" ? "used" : l.status === "fault" ? "err" : "") + '" title="' + esc(l.code) + " " + statusName[l.status] + '"></div>');
+      }
+      if (cells.length) cellsHtml = cells.join("");
+    }
+  }
+  return '<div class="kiosk"><div class="k-head"><button class="icon-btn" data-action="kioskHome">' + I.back + '</button><div class="ttl">扫码下单</div></div>' +
+    '<div class="k-pad"><div class="qr-box"><div class="tiny faint">请在手机 App 完成选柜支付</div>' +
+    '<div class="mono" style="font-size:12px;margin-top:10px">演示说明：柜机端引导用户到手机端下单；<br>下单成功后柜门自动弹开。</div></div>' +
+    '<div class="section-h mt20"><b>本站柜格实时状态</b></div><div id="k-cells" class="locker-grid-mini mt10">' + cellsHtml + '</div>' +
+    '<div class="section-h mt20"><b>附近网点</b></div>' + outlets.slice(0, 3).map((o) => '<div class="card mt8">' + esc(o.name) + " · 空闲 " + o.idle + " 格</div>").join("") +
+    '<button class="btn btn-primary mt20" data-action="nav" data-id="u-spec">去手机端下单（演示）</button></div></div>';
+};
+
+routes["k-pickup"] = function () {
+  return '<div class="kiosk"><div class="k-head"><button class="icon-btn" data-action="kioskHome">' + I.back + '</button><div class="ttl">取件</div></div>' +
+    '<div class="k-pad"><div class="qr-box"><div class="tiny faint">输入取件码 / 扫码 / 人脸识别</div></div>' +
+    '<input class="input mono mt16" id="kCode" maxlength="6" placeholder="6位取件码" inputmode="numeric" style="font-size:22px;text-align:center">' +
+    '<button class="k-btn mt16" id="kGo">开 柜 取 件</button>' +
+    '<div id="kMsg" class="mt16"></div></div></div>';
+};
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#kGo")) {
+    const code = $("#kCode").value.trim();
+    api("/api/orders/0/pickup", "POST", { method: "code", code }).then((r) => {
+      $("#kMsg").innerHTML = '<div class="card"><div class="big-ok">柜门已弹开 · 柜格 ' + esc(r.lockerCode) + '</div><button class="btn btn-primary mt12" id="kDone" style="width:100%">已取出物品，关门结算</button></div>';
+      $("#kDone").onclick = () => finishPickup(r.orderId);
+    }).catch((err) => { $("#kMsg").innerHTML = '<div class="card">' + esc(err.message) + "</div>"; });
+  }
+});
+
+/* ================================================================
+ *  管理后台
+ * ================================================================ */
+const adminMenus = [
+  ["m-dash", "数据看板"], ["m-outlets", "网点管理"], ["m-monitor", "柜格监控"], ["m-rules", "收费规则"],
+  ["m-coupons", "优惠券"], ["m-orders", "订单管理"], ["m-revenue", "营收明细"], ["m-alerts", "异常告警"],
+  ["m-staff", "员工管理"], ["m-cs", "客服工作台"],
+];
+function adminShell(active, body) {
+  const info = state.adminInfo || JSON.parse(localStorage.getItem("locker_admin") || "null") || { name: "管理员", role: "", menus: [] };
+  const allowed = info.menus || [];
+  return '<div class="admin-wrap"><div class="admin-side">' +
+    '<div class="admin-logo">Smart-Locker 后台</div>' +
+    '<div class="tiny faint" style="padding:0 16px">' + esc(info.name) + (info.role ? " · " + roleCn(info.role) : "") + '</div>' +
+    adminMenus.filter((m) => allowed.includes(m[0])).map((m) =>
+      '<button class="admin-nav ' + (active === m[0] ? "on" : "") + '" data-action="adminNav" data-id="' + m[0] + '">' + esc(m[1]) + "</button>").join("") +
+    '<button class="admin-nav" data-action="adminLogout" style="margin-top:auto">退出登录</button></div>' +
+    '<div class="admin-main">' + body + "</div></div>";
+}
+function roleCn(r) { return { super: "超级管理员", site_admin: "网点管理员", service: "在线客服" }[r] || r; }
+
+routes["m-login"] = function () {
+  return '<div class="admin-wrap"><div class="admin-login"><div class="admin-logo">Smart-Locker 管理后台</div>' +
+    '<input class="input mt16" id="admId" placeholder="账号或手机号">' +
+    '<input class="input mt12" id="admPwd" type="password" placeholder="密码">' +
+    '<button class="btn btn-primary mt16" id="admLogin" style="width:100%">登 录</button>' +
+    '<div class="faint tiny mt16" style="line-height:1.8">演示账号（密码 000000）：<br>super 超级管理员 · site_rm 网点管理员 · svc 在线客服</div></div></div>';
+};
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#admLogin")) {
+    const identity = $("#admId").value.trim();
+    const password = $("#admPwd").value;
+    api("/api/admin/login", "POST", { identity, password }).then((r) => {
+      localStorage.setItem("locker_admin", JSON.stringify(r));
+      state.adminToken = r.token;
+      state.adminInfo = r;
+      go("m-dash");
+    }).catch((err) => toast(err.message));
+  }
+});
+
+/* 管理端 API 走独立 token */
+async function admApi(path, method, body) {
+  const info = JSON.parse(localStorage.getItem("locker_admin") || "null");
+  const headers = { "Content-Type": "application/json" };
+  if (info && info.token) headers["X-Token"] = info.token;
+  const resp = await fetch(path, { method: method || "GET", headers, body: body ? JSON.stringify(body) : undefined });
+  let data = null;
+  try { data = await resp.json(); } catch (e) {}
+  if (!resp.ok) throw new Error((data && data.error) || ("HTTP " + resp.status));
+  return data;
+}
+
+function adminGuard(view) {
+  const raw = localStorage.getItem("locker_admin");
+  if (!raw) { go("m-login"); return ""; }
+  const info = JSON.parse(raw);
+  if (!(info.menus || []).includes(view)) return adminShell("m-dash", '<div class="card">无权限访问该模块</div>');
+  return null;
+}
+
+routes["m-dash"] = async function () {
+  const g = adminGuard("m-dash");
+  if (g !== null) return g;
+  const d = await admApi("/api/admin/dashboard?range=" + (state.dashRange || "today"));
+  state._after = () => {
+    document.querySelectorAll(".dash-r").forEach((b) => { b.onclick = () => { state.dashRange = b.dataset.r; render(); }; });
+  };
+  return adminShell("m-dash",
+    '<div class="row" style="justify-content:space-between"><div class="h2">数据看板</div><div>' +
+    ["today|今日", "yesterday|昨日", "month|本月"].map((x) => { const [k, n] = x.split("|"); return '<button class="btn ' + (state.dashRange === k ? "btn-primary" : "") + ' dash-r" data-r="' + k + '">' + n + "</button>"; }).join(" ") + "</div></div>" +
+    '<div class="stat-grid mt16">' +
+    statCard("营收（净）", "¥" + yuan2(d.revenue)) + statCard("订单数", d.orders) + statCard("柜格使用率", d.usageRate.toFixed(1) + "%") + statCard("未处理告警", d.openAlerts) +
+    "</div>" +
+    '<div class="card mt16"><div class="bold14 mb10">近 7 日订单趋势</div><div class="trend-row">' +
+    d.trend.map((t) => '<div class="trend-col"><div class="mono bold14">' + t.orders + '</div><div class="trend-bar" style="height:' + (8 + Math.min(t.orders, 20) * 5) + 'px"></div><div class="tiny faint">' + esc(t.date) + "</div></div>").join("") +
+    "</div></div>" +
+    '<div class="card mt16 faint tiny">收款 ¥' + yuan2(d.income) + " · 退款 ¥" + yuan2(d.refund) + " · 补交 ¥" + yuan2(d.extra) + " · 使用柜格 " + d.usedLockers + "/" + d.totalLockers + "</div>");
+};
+function statCard(lbl, val) {
+  return '<div class="stat-card"><div class="tiny faint">' + lbl + '</div><div class="stat-val mono">' + esc(val) + "</div></div>";
+}
+
+routes["m-outlets"] = async function () {
+  const g = adminGuard("m-outlets");
+  if (g !== null) return g;
+  const outs = await admApi("/api/admin/outlets").catch(() => []);
+  state._after = () => {
+    $("#addOutlet").onclick = () => {
+      modal('<div class="bold14 mb10">新增网点</div><input class="input" id="noName" placeholder="网点名称"><input class="input mt8" id="noAddr" placeholder="地址"><input class="input mt8" id="noCity" placeholder="城市"><button class="btn btn-primary mt12" id="noSave" style="width:100%">创建（自动配柜组与默认规则）</button>');
+      $("#noSave").onclick = async () => {
+        try {
+          await admApi("/api/admin/outlets", "POST", { name: $("#noName").value, address: $("#noAddr").value, city: $("#noCity").value, status: "normal" });
+          closeModal(); toast("创建成功"); render();
+        } catch (err) { toast(err.message); }
+      };
+    };
+    document.querySelectorAll(".out-toggle").forEach((b) => {
+      b.onclick = () => {
+        const st = b.dataset.st === "normal" ? "paused" : "normal";
+        admApi("/api/admin/outlets/" + b.dataset.id, "PUT", { status: st }).then(() => { toast("已更新"); render(); }).catch((err) => toast(err.message));
+      };
+    });
+  };
+  return adminShell("m-outlets",
+    '<div class="row" style="justify-content:space-between"><div class="h2">网点管理</div><button class="btn btn-primary" id="addOutlet">新增网点</button></div>' +
+    '<table class="tbl mt16"><thead><tr><th>ID</th><th>名称</th><th>城市</th><th>地址</th><th>状态</th><th>空闲</th><th>操作</th></tr></thead><tbody>' +
+    outs.map((o) => "<tr><td>" + o.id + "</td><td>" + esc(o.name) + "</td><td>" + esc(o.city) + "</td><td>" + esc(o.address) + '</td><td>' +
+      (o.status === "normal" ? '<span class="chip chip-ok">营业</span>' : '<span class="chip chip-err">暂停</span>') + "</td><td class='mono'>" + o.idle + "</td><td>" +
+      '<button class="btn sm out-toggle" data-id="' + o.id + '" data-st="' + o.status + '">' + (o.status === "normal" ? "暂停" : "恢复") + "</button></td></tr>").join("") +
+    "</tbody></table>");
+};
+
+routes["m-monitor"] = async function () {
+  const g = adminGuard("m-monitor");
+  if (g !== null) return g;
+  const outs = await admApi("/api/admin/outlets").catch(() => []);
+  const oid = state.monOutlet || (outs[0] && outs[0].id) || 0;
+  const lockers = oid ? await admApi("/api/admin/lockers?outletId=" + oid) : [];
+  state._after = () => {
+    document.querySelectorAll(".mon-o").forEach((b) => { b.onclick = () => { state.monOutlet = Number(b.dataset.id); render(); }; });
+    document.querySelectorAll(".mon-cell").forEach((c) => {
+      c.onclick = async () => {
+        const lid = Number(c.dataset.lid);
+        const d = await admApi("/api/admin/lockers/" + lid).catch(() => null);
+        if (!d) return;
+        modal('<div class="bold14 mb10">柜格 ' + esc(d.code) + " " + statusChip(d.status) + "</div>" +
+          '<div class="tiny faint">状态：' + statusName[d.status] + (d.faultSource ? " · 来源：" + esc(d.faultSource) : "") + (d.faultNote ? " · " + esc(d.faultNote) : "") + "</div>" +
+          (d.order ? '<div class="tiny faint mt8">关联订单 ' + esc(d.order.orderNo) + "</div>" : "") +
+          '<div class="row gap8 mt16"><button class="btn flex1 mon-act" data-a="remote_open">远程开柜</button><button class="btn flex1 mon-act" data-a="repair">报修恢复</button><button class="btn flex1 mon-act" data-a="switch">切换柜格</button></div>');
+        document.querySelectorAll(".mon-act").forEach((b) => {
+          b.onclick = () => {
+            admApi("/api/admin/lockers/" + lid + "/action", "POST", { action: b.dataset.a }).then((r) => {
+              closeModal(); toast(r.note || ("新柜格 " + r.newLocker)); render();
+            }).catch((err) => toast(err.message));
+          };
+        });
+      };
+    });
+  };
+  return adminShell("m-monitor",
+    '<div class="h2">柜格监控</div><div class="row gap8 mt12">' +
+    outs.map((o) => '<button class="btn ' + (o.id === oid ? "btn-primary" : "") + ' mon-o" data-id="' + o.id + '">' + esc(o.name) + "</button>").join("") + "</div>" +
+    '<div class="mt16" id="mon-cells">' + lockers.map((l) =>
+      '<div class="mon-cell" data-lid="' + l.id + '" title="' + esc(l.code) + " " + statusName[l.status] + (l.faultNote ? " · " + esc(l.faultNote) : "") + '">' +
+      '<div class="mono tiny">' + esc(l.code) + "</div><div class='tiny'>" + (sizeName[l.size || l.Size] || l.size || l.Size || "") + "</div>" + statusChip(l.status) + "</div>").join("") + "</div>" +
+    '<div class="faint tiny mt12">点击柜格查看明细并执行 远程开柜 / 报修恢复 / 切换柜格</div>');
+};
+
+routes["m-rules"] = async function () {
+  const g = adminGuard("m-rules");
+  if (g !== null) return g;
+  const outs = await admApi("/api/admin/outlets").catch(() => []);
+  const oid = state.ruleOutlet || (outs[0] && outs[0].id) || 0;
+  const rule = oid ? await admApi("/api/admin/rules/" + oid).catch(() => null) : null;
+  const f = (id, lbl, val) => '<label class="lbl">' + lbl + '</label><input class="input" id="' + id + '" value="' + (val == null ? "" : esc(val)) + '">';
+  state._after = () => {
+    document.querySelectorAll(".rule-o").forEach((b) => { b.onclick = () => { state.ruleOutlet = Number(b.dataset.id); render(); }; });
+    const save = $("#saveRule");
+    if (save) save.onclick = async () => {
+      try {
+        await admApi("/api/admin/rules/" + oid, "PUT", {
+          mode: $("#rMode").value, freeMinutes: Number($("#rFree").value),
+          priceS: Number($("#rPS").value), priceM: Number($("#rPM").value), priceL: Number($("#rPL").value),
+          depositS: Number($("#rDS").value), depositM: Number($("#rDM").value), depositL: Number($("#rDL").value),
+          capS: Number($("#rCS").value), capM: Number($("#rCM").value), capL: Number($("#rCL").value),
+        });
+        toast("已保存");
+      } catch (err) { toast(err.message); }
+    };
+  };
+  return adminShell("m-rules",
+    '<div class="h2">收费规则</div><div class="row gap8 mt12">' +
+    outs.map((o) => '<button class="btn ' + (o.id === oid ? "btn-primary" : "") + ' rule-o" data-id="' + o.id + '">' + esc(o.name) + "</button>").join("") + "</div>" +
+    (rule ? '<div class="card mt16">' +
+      '<div class="row gap16"><div style="flex:1">' + f("rMode", "收费模式（hourly=按时 daily=按日）", rule.mode) + "</div><div style='flex:1'>" + f("rFree", "免费时长(分钟)", rule.freeMinutes) + "</div></div>" +
+      '<div class="row gap16 mt12"><div style="flex:1">' + f("rPS", "小格单价(分)", rule.priceS) + "</div><div style='flex:1'>" + f("rPM", "中格单价(分)", rule.priceM) + "</div><div style='flex:1'>" + f("rPL", "大格单价(分)", rule.priceL) + "</div></div>" +
+      '<div class="row gap16 mt12"><div style="flex:1">' + f("rDS", "小格押金", rule.depositS) + "</div><div style='flex:1'>" + f("rDM", "中格押金", rule.depositM) + "</div><div style='flex:1'>" + f("rDL", "大格押金", rule.depositL) + "</div></div>" +
+      '<div class="row gap16 mt12"><div style="flex:1">' + f("rCS", "小格封顶", rule.capS) + "</div><div style='flex:1'>" + f("rCM", "中格封顶", rule.capM) + "</div><div style='flex:1'>" + f("rCL", "大格封顶", rule.capL) + "</div></div>" +
+      '<button class="btn btn-primary mt16" id="saveRule" style="width:100%">保存规则</button></div>' : '<div class="card mt16 faint">该网点未配置规则</div>'));
+};
+
+routes["m-coupons"] = async function () {
+  const g = adminGuard("m-coupons");
+  if (g !== null) return g;
+  const defs = await admApi("/api/admin/coupons").catch(() => []);
+  state._after = () => {
+    $("#addCp").onclick = () => {
+      modal('<div class="bold14 mb10">新建优惠券</div>' +
+        '<input class="input" id="cpName" placeholder="券名称"><div class="row gap8 mt8"><select class="input flex1" id="cpType"><option value="discount">折扣券</option><option value="hour">时长券(分钟)</option><option value="amount">金额券(分)</option></select><input class="input flex1" id="cpVal" placeholder="面值"></div>' +
+        '<div class="row gap8 mt8"><input class="input flex1" id="cpFrom" placeholder="开始 2026-01-01"><input class="input flex1" id="cpTo" placeholder="结束 2026-12-31"><input class="input flex1" id="cpTotal" placeholder="数量"></div>' +
+        '<button class="btn btn-primary mt12" id="cpSave" style="width:100%">创建</button>');
+      $("#cpSave").onclick = async () => {
+        try {
+          await admApi("/api/admin/coupons", "POST", {
+            name: $("#cpName").value, type: $("#cpType").value, value: Number($("#cpVal").value), scope: "all",
+            validFrom: $("#cpFrom").value, validTo: $("#cpTo").value, totalCount: Number($("#cpTotal").value),
+          });
+          closeModal(); toast("创建成功"); render();
+        } catch (err) { toast(err.message); }
+      };
+    };
+    document.querySelectorAll(".cp-toggle").forEach((b) => {
+      b.onclick = () => {
+        admApi("/api/admin/coupons/" + b.dataset.id + "/toggle", "POST", { enabled: b.dataset.en !== "true" }).then(() => { toast("已更新"); render(); }).catch((err) => toast(err.message));
+      };
+    });
+  };
+  return adminShell("m-coupons",
+    '<div class="row" style="justify-content:space-between"><div class="h2">优惠券</div><button class="btn btn-primary" id="addCp">新建优惠券</button></div>' +
+    '<table class="tbl mt16"><thead><tr><th>ID</th><th>名称</th><th>类型</th><th>面额/折扣</th><th>范围</th><th>有效期</th><th>发放/已领</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
+    defs.map((d) => "<tr><td>" + d.id + "</td><td>" + esc(d.name) + "</td><td>" + ({ discount: "折扣券", hour: "时长券", amount: "金额券" }[d.type] || d.type) + "</td><td class='mono'>" +
+      (d.type === "discount" ? (d.value / 10) + "折" : d.type === "hour" ? d.value + "分钟" : "¥" + yuan(d.value)) + "</td><td>" + (d.scope === "outlet" ? "网点" + d.outletId : "全部") + "</td><td class='tiny'>" + esc(d.validFrom) + "~" + esc(d.validTo) + "</td><td class='mono'>" + d.used + "/" + d.total + "</td><td>" +
+      (d.enabled ? '<span class="chip chip-ok">启用</span>' : '<span class="chip chip-err">停用</span>') + "</td><td>" +
+      '<button class="btn sm cp-toggle" data-id="' + d.id + '" data-en="' + d.enabled + '">' + (d.enabled ? "停用" : "启用") + "</button></td></tr>").join("") +
+    "</tbody></table>");
+};
+
+routes["m-orders"] = async function () {
+  const g = adminGuard("m-orders");
+  if (g !== null) return g;
+  const st = state.admOrderStatus || "";
+  const orders = await admApi("/api/admin/orders" + (st ? "?status=" + st : "")).catch(() => []);
+  state._after = () => {
+    document.querySelectorAll(".ord-f").forEach((b) => { b.onclick = () => { state.admOrderStatus = b.dataset.k; render(); }; });
+  };
+  return adminShell("m-orders",
+    '<div class="h2">订单管理</div><div class="row gap8 mt12">' +
+    ["|全部", "active|进行中", "finished|已结束"].map((x) => { const [k, n] = x.split("|"); return '<button class="btn ' + (st === k ? "btn-primary" : "") + ' ord-f" data-k="' + k + '">' + n + "</button>"; }).join(" ") + "</div>" +
+    '<table class="tbl mt16"><thead><tr><th>订单号</th><th>网点</th><th>柜型</th><th>模式</th><th>状态</th><th>费用</th><th>退款</th><th>补交</th><th>取件方式</th></tr></thead><tbody>' +
+    orders.map((o) => "<tr><td class='mono tiny'>" + esc(o.orderNo) + "</td><td>" + o.outletId + "</td><td>" + (sizeName[o.size] || o.size || "") + "</td><td>" + (o.payMode === "deposit" ? "押金" : "预付") + "</td><td>" +
+      (o.status === "active" ? '<span class="chip chip-ok">进行中</span>' : '<span class="chip">已结束</span>') + "</td><td class='mono'>¥" + yuan2(o.fee) + "</td><td class='mono'>¥" + yuan2(o.refund) + "</td><td class='mono'>" + (o.extra ? "¥" + yuan2(o.extra) + (o.extraPaid ? "✓" : "未付") : "-") + "</td><td>" + (o.pickupMethod || "-") + "</td></tr>").join("") +
+    "</tbody></table>");
+};
+
+routes["m-revenue"] = async function () {
+  const g = adminGuard("m-revenue");
+  if (g !== null) return g;
+  const dim = state.revDim || "outlet";
+  const r = await admApi("/api/admin/revenue?dim=" + dim).catch(() => ({ rows: [] }));
+  state._after = () => {
+    document.querySelectorAll(".rev-d").forEach((b) => { b.onclick = () => { state.revDim = b.dataset.k; render(); }; });
+    $("#expCsv").onclick = () => {
+      const info = JSON.parse(localStorage.getItem("locker_admin"));
+      window.open("/api/admin/revenue/export?token=" + info.token);
+    };
+  };
+  return adminShell("m-revenue",
+    '<div class="row" style="justify-content:space-between"><div class="h2">营收明细（本月）</div><button class="btn" id="expCsv">导出对账单 CSV</button></div>' +
+    '<div class="row gap8 mt12">' + ["outlet|按网点", "group|按柜组", "order|按订单"].map((x) => { const [k, n] = x.split("|"); return '<button class="btn ' + (dim === k ? "btn-primary" : "") + ' rev-d" data-k="' + k + '">' + n + "</button>"; }).join(" ") + "</div>" +
+    '<div class="stat-grid mt16">' + statCard("收款", "¥" + yuan2(r.income)) + statCard("退款", "¥" + yuan2(r.refund)) + statCard("补交", "¥" + yuan2(r.extra)) + statCard("净营收", "¥" + yuan2(r.total)) + "</div>" +
+    '<table class="tbl mt16"><thead><tr>' +
+    (dim === "outlet" ? "<th>网点</th><th>收款</th><th>退款</th><th>补交</th><th>净额</th>" :
+      dim === "group" ? "<th>柜组</th><th>收款</th><th>退款</th><th>补交</th><th>净额</th>" :
+        "<th>订单</th><th>类型</th><th>金额</th><th>时间</th>") + "</tr></thead><tbody>" +
+    (r.rows || []).map((row) => dim === "order" ?
+      "<tr><td class='mono'>" + row.orderId + "</td><td>" + ({ income: "收款", refund: "退款", extra: "补交" }[row.kind] || row.kind) + "</td><td class='mono'>¥" + yuan2(row.amount) + "</td><td class='tiny'>" + esc(row.time) + "</td></tr>" :
+      "<tr><td>" + esc(row.name || ("#" + (row.outletId || row.groupId))) + "</td><td class='mono'>¥" + yuan2(row.income) + "</td><td class='mono'>¥" + yuan2(row.refund) + "</td><td class='mono'>¥" + yuan2(row.extra) + "</td><td class='mono'><b>¥" + yuan2(row.net) + "</b></td></tr>").join("") +
+    "</tbody></table>");
+};
+
+routes["m-alerts"] = async function () {
+  const g = adminGuard("m-alerts");
+  if (g !== null) return g;
+  const st = state.alertStatus || "open";
+  const alerts = await admApi("/api/admin/alerts?status=" + st).catch(() => ({ alerts: [] }));
+  const list = alerts.alerts || [];
+  state._after = () => {
+    document.querySelectorAll(".al-f").forEach((b) => { b.onclick = () => { state.alertStatus = b.dataset.k; render(); }; });
+    document.querySelectorAll(".al-handle").forEach((b) => {
+      b.onclick = () => {
+        admApi("/api/admin/alerts/" + b.dataset.id + "/handle", "POST", {}).then(() => { toast("已处理"); render(); }).catch((err) => toast(err.message));
+      };
+    });
+  };
+  return adminShell("m-alerts",
+    '<div class="h2">异常告警</div><div class="row gap8 mt12">' +
+    ["open|未处理", "handled|已处理", "|全部"].map((x) => { const [k, n] = x.split("|"); return '<button class="btn ' + (st === k ? "btn-primary" : "") + ' al-f" data-k="' + k + '">' + n + "</button>"; }).join(" ") + "</div>" +
+    '<div class="mt16">' + (list.length ? list.map((a) =>
+      '<div class="card mb10"><div class="row" style="justify-content:space-between"><b>' + esc(a.title) + '</b><span class="chip ' + (a.level === "high" ? "chip-err" : "chip-warn") + '">' + (a.level === "high" ? "高" : "中") + "</span></div>" +
+      '<div class="tiny faint mt5">' + esc(a.description) + " · " + esc(a.time) + " · 来源 " + esc(a.source) + (a.handler ? " · 处理人 " + esc(a.handler) : "") + "</div>" +
+      (a.status === "open" ? '<button class="btn sm mt8 al-handle" data-id="' + a.id + '">标记已处理</button>' : '<span class="chip chip-ok mt8" style="display:inline-block">已处理</span>') + "</div>").join("")
+      : '<div class="card faint">暂无告警</div>') + "</div>");
+};
+
+routes["m-staff"] = async function () {
+  const g = adminGuard("m-staff");
+  if (g !== null) return g;
+  const staffs = await admApi("/api/admin/staff").catch(() => []);
+  state._after = () => {
+    $("#addStaff").onclick = () => {
+      modal('<div class="bold14 mb10">新建员工</div>' +
+        '<div class="row gap8"><input class="input flex1" id="sfNo" placeholder="工号"><input class="input flex1" id="sfAcc" placeholder="账号"></div>' +
+        '<div class="row gap8 mt8"><input class="input flex1" id="sfName" placeholder="姓名"><input class="input flex1" id="sfPhone" placeholder="手机号"></div>' +
+        '<div class="row gap8 mt8"><select class="input flex1" id="sfRole"><option value="super">超级管理员</option><option value="site_admin">网点管理员</option><option value="service">在线客服</option></select><input class="input flex1" id="sfOutlet" placeholder="网点ID(网点管理员填)"></div>' +
+        '<input class="input mt8" id="sfPwd" type="password" placeholder="初始密码">' +
+        '<button class="btn btn-primary mt12" id="sfSave" style="width:100%">创建</button>');
+      $("#sfSave").onclick = async () => {
+        try {
+          await admApi("/api/admin/staff", "POST", {
+            empNo: $("#sfNo").value, account: $("#sfAcc").value, name: $("#sfName").value, phone: $("#sfPhone").value,
+            role: $("#sfRole").value, password: $("#sfPwd").value, scopeOutletId: Number($("#sfOutlet").value || 0),
+          });
+          closeModal(); toast("创建成功"); render();
+        } catch (err) { toast(err.message); }
+      };
+    };
+    document.querySelectorAll(".st-role").forEach((b) => {
+      b.onclick = () => {
+        const nid = prompt("输入新角色：super / site_admin / service");
+        if (!nid) return;
+        admApi("/api/admin/staff/" + b.dataset.id + "/role", "POST", { role: nid }).then(() => { toast("已修改，登录态已失效"); render(); }).catch((err) => toast(err.message));
+      };
+    });
+    document.querySelectorAll(".st-pwd").forEach((b) => {
+      b.onclick = () => {
+        const pwd = prompt("输入新密码（≥6位）");
+        if (!pwd) return;
+        admApi("/api/admin/staff/" + b.dataset.id + "/reset-pwd", "POST", { password: pwd }).then(() => { toast("已重置"); }).catch((err) => toast(err.message));
+      };
+    });
+    document.querySelectorAll(".st-toggle").forEach((b) => {
+      b.onclick = () => {
+        admApi("/api/admin/staff/" + b.dataset.id + "/toggle", "POST", { status: b.dataset.st === "active" ? "disabled" : "active" }).then(() => { toast("已更新"); render(); }).catch((err) => toast(err.message));
+      };
+    });
+  };
+  return adminShell("m-staff",
+    '<div class="row" style="justify-content:space-between"><div class="h2">员工管理</div><button class="btn btn-primary" id="addStaff">新建员工</button></div>' +
+    '<table class="tbl mt16"><thead><tr><th>工号</th><th>姓名</th><th>账号</th><th>手机号</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
+    staffs.map((s) => "<tr><td class='mono'>" + esc(s.empNo) + "</td><td>" + esc(s.name) + "</td><td>" + esc(s.account) + "</td><td>" + esc(s.phone) + "</td><td>" + roleCn(s.role) + "</td><td>" +
+      (s.status === "active" ? '<span class="chip chip-ok">启用</span>' : '<span class="chip chip-err">禁用</span>') + "</td><td>" +
+      '<button class="btn sm st-role" data-id="' + s.id + '">改角色</button> <button class="btn sm st-pwd" data-id="' + s.id + '">重置密码</button> <button class="btn sm st-toggle" data-id="' + s.id + '" data-st="' + s.status + '">' + (s.status === "active" ? "禁用" : "启用") + "</button></td></tr>").join("") +
+    "</tbody></table>" +
+    '<div class="card mt16 faint tiny">修改角色/重置密码/禁用后，该员工登录态立即失效，需重新登录</div>');
+};
+
+routes["m-cs"] = async function () {
+  const g = adminGuard("m-cs");
+  if (g !== null) return g;
+  const duty = await admApi("/api/admin/cs/duty").catch(() => ({ duty: false }));
+  const sessions = await admApi("/api/admin/cs/sessions").catch(() => ({ sessions: [], pendingTickets: 0 }));
+  state._after = () => {
+    $("#dutyBtn").onclick = () => {
+      admApi("/api/admin/cs/duty", "POST", { on: !duty.duty }).then(() => { toast(duty.duty ? "已切换为下班" : "已切换为在岗"); render(); }).catch((err) => toast(err.message));
+    };
+    document.querySelectorAll(".cs-row").forEach((r) => {
+      r.onclick = () => openCsPanel(Number(r.dataset.uid), svcSessionName(sessions.sessions.find((s) => s.userId === Number(r.dataset.uid)) || { userId: r.dataset.uid }));
+    });
+    loadTickets(svcTkToken());
+  };
+  return adminShell("m-cs",
+    '<div class="row" style="justify-content:space-between"><div class="h2">客服工作台</div><button class="btn ' + (duty.duty ? "btn-primary" : "") + '" id="dutyBtn">' + (duty.duty ? "模拟下班" : "模拟上班") + "</button></div>" +
+    '<div class="card mt16"><div class="bold14 mb10">在线会话（' + (sessions.sessions || []).length + '）· 待处理工单 ' + sessions.pendingTickets + '</div>' +
+    (sessions.sessions || []).map((s) =>
+      '<div class="row cs-row" data-uid="' + s.userId + '" style="justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--bg-2)"><div><b>' + esc(s.userName || ("用户" + s.userId)) + '</b><span class="chip ml8 ' + (s.state === "agent" ? "chip-ok" : s.state === "waiting" ? "chip-warn" : "") + '">' +
+      (s.state === "agent" ? "接待中" : s.state === "waiting" ? "排队中" : "智能客服") + '</span></div><span class="tiny faint">' + esc(s.updatedAt) + "</span></div>").join("") + "</div>" +
+    '<div class="card mt12" id="csPanel"><div class="faint tiny">点击左侧会话开始接待</div></div>' +
+    '<div class="section-h mt16"><b>工单列表</b></div><div id="ticketList" class="mt10"></div>');
+};
+
+function svcSessionName(row) { return (row.userName || "用户" + row.userId); }
+function svcTkToken() { const info = JSON.parse(localStorage.getItem("locker_admin") || "null"); return info && info.token; }
+
+function openCsPanel(uid, name) {
+  const info = JSON.parse(localStorage.getItem("locker_admin") || "null");
+  let after = 0;
+  const panel = $("#csPanel");
+  panel.innerHTML = '<div class="bold14 mb10">接待：' + esc(name) + '</div><div id="csMsgs" class="chat-list" style="max-height:220px"></div>' +
+    '<div class="row gap8 mt10"><input class="input flex1" id="csInput" placeholder="回复用户…"><button class="btn btn-primary" id="csSend">回复</button></div>';
+  const poll = async () => {
+    const data = await admApi("/api/admin/cs/messages?userId=" + uid + "&afterId=" + after).catch(() => null);
+    if (data && data.messages && data.messages.length) {
+      after = data.messages[data.messages.length - 1].id;
+      $("#csMsgs").innerHTML += data.messages.map(chatBubble).join("");
+      $("#csMsgs").scrollTop = $("#csMsgs").scrollHeight;
+    }
+  };
+  poll();
+  if (openCsPanel._timer) clearInterval(openCsPanel._timer);
+  openCsPanel._timer = setInterval(poll, 3000);
+  $("#csSend").onclick = async () => {
+    const input = $("#csInput");
+    const content = input.value.trim();
+    if (!content) return;
+    input.value = "";
+    await admApi("/api/admin/cs/reply", "POST", { userId: uid, content }).catch((err) => toast(err.message));
+    poll();
+  };
+}
+
+async function loadTickets(token) {
+  const data = await admApi("/api/admin/tickets?status=pending").catch(() => ({ tickets: [] }));
+  const list = data.tickets || [];
+  const el = $("#ticketList");
+  if (el) el.innerHTML = list.length ? list.map((t) =>
+    '<div class="card mb10"><div class="row" style="justify-content:space-between"><b class="mono tiny">' + esc(t.ticketNo) + '</b><span class="chip chip-warn">待处理</span></div>' +
+    '<div class="tiny mt5">' + esc(t.question) + '</div><div class="row gap8 mt8"><input class="input flex1 tk-reply" placeholder="处理回复"><button class="btn sm tk-go" data-id="' + t.id + '">结案</button></div></div>').join("")
+    : '<div class="faint tiny">暂无待处理工单</div>';
+  document.querySelectorAll(".tk-go").forEach((b) => {
+    b.onclick = () => {
+      const reply = b.parentElement.querySelector(".tk-reply").value.trim();
+      admApi("/api/admin/tickets/" + b.dataset.id + "/resolve", "POST", { reply }).then(() => { toast("已结案"); loadTickets(token); }).catch((err) => toast(err.message));
+    };
+  });
+}
+
+/* 启动 */
+render();
