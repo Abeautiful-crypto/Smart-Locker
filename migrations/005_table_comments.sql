@@ -1,0 +1,19 @@
+-- 005_table_comments.sql 为所有业务表补充中文注释（在数据库管理工具中可直接查看用途）
+ALTER TABLE schema_migrations COMMENT = '迁移执行记录：已执行的 SQL 迁移文件名';
+ALTER TABLE users COMMENT = '用户表：手机号注册的 C 端用户，含取件密码与头像';
+ALTER TABLE staff COMMENT = '员工表：后台账号（super 超管 / site_admin 网点管理员 / service 客服）';
+ALTER TABLE outlets COMMENT = '网点表：寄存柜所在网点，含城市、地址、状态（normal/paused）';
+ALTER TABLE cabinet_groups COMMENT = '柜组表：网点下的柜格分组，用于按组管理柜格';
+ALTER TABLE lockers COMMENT = '柜格表：每个物理柜格，含规格(S/M/L)、状态(idle/occupied/fault)与当前订单';
+ALTER TABLE outlet_rules COMMENT = '收费规则表：每网点按时计费/按日计费、单价、押金、封顶、免费时长';
+ALTER TABLE orders COMMENT = '订单表：存件订单，含取件码、预付/押金、结算费用与退款、状态';
+ALTER TABLE coupon_defs COMMENT = '优惠券定义表：折扣券/时长券/金额券的模板与有效期';
+ALTER TABLE coupon_instances COMMENT = '优惠券实例表：发放给用户的券，含使用状态';
+ALTER TABLE alerts COMMENT = '异常告警表：柜格故障/用户上报等告警及处理状态';
+ALTER TABLE tickets COMMENT = '工单表：人工客服下班期间用户问题转成的待处理工单';
+ALTER TABLE kb_entries COMMENT = '客服知识库表：智能客服关键词匹配与标准答复';
+ALTER TABLE chat_messages COMMENT = '聊天消息表：用户与智能/人工客服的消息记录';
+ALTER TABLE chat_sessions COMMENT = '客服会话表：用户会话状态（bot/waiting/agent）';
+ALTER TABLE sessions COMMENT = '登录会话表：用户与后台的 token 会话';
+ALTER TABLE payments COMMENT = '支付流水表：模拟支付记录（预付/补交）';
+ALTER TABLE revenue_records COMMENT = '营收流水表：收款/退款/补交明细，供看板与对账使用';

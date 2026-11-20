@@ -15,7 +15,7 @@ function check(name, ok, detail) { ok ? pass++ : fail++; console.log((ok ? "[PAS
   // 登录用户
   await page.goto(BASE + "#u-login", { waitUntil: "load" });
   await page.waitForTimeout(300);
-  await page.fill("#phone", "13900001113"); await page.fill("#code", "1234"); await page.check("#agreeChk");
+  await page.click('.login-tab[data-m="code"]'); await page.waitForTimeout(150); await page.fill("#phone", "13900001113"); await page.fill("#code", "1234"); await page.check("#agreeChk");
   await page.click("#doLogin"); await page.waitForTimeout(1800); // 等待登录 toast 消失
 
   // Q4 我的：无员工后台入口 + 取件密码可设置

@@ -39,12 +39,15 @@ func (s *Server) handleSendCode(w http.ResponseWriter, r *http.Request) {
 }
 
 type userLoginReq struct {
-	Phone string `json:"phone"`
-	Code  string `json:"code"`
-	Agree bool   `json:"agree"`
+	Phone    string `json:"phone"`
+	Code     string `json:"code"`
+	Password string `json:"password"`
+	Mode     string `json:"mode"` // password（默认，需已设置密码） / code（忘记密码兜底）
+	Agree    bool   `json:"agree"`
 }
 
-// handleUserLogin 手机号+验证码登录，未注册自动注册；必须勾选协议
+// handleUserLogin 手机号+密码登录（默认）；忘记密码可用验证码 1234 登录。
+// 两种方式均：未注册自动注册；必须勾选协议。
 func (s *Server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 	var req userLoginReq
 	if err := readJSON(r, &req); err != nil {
@@ -55,16 +58,26 @@ func (s *Server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "手机号格式不正确")
 		return
 	}
-	if req.Code != "1234" {
-		writeErr(w, 400, "验证码错误")
-		return
-	}
 	if !req.Agree {
 		writeErr(w, 400, "请先阅读并同意用户协议与隐私政策")
 		return
 	}
+	mode := req.Mode
+	if mode == "" {
+		// 兼容旧客户端：传了 code 走验证码，否则默认密码
+		mode = "password"
+		if req.Code != "" {
+			mode = "code"
+		}
+	}
 	u, err := s.st.GetUserByPhone(r.Context(), req.Phone)
-	if errors.Is(err, store.ErrNotFound) {
+	isNew := errors.Is(err, store.ErrNotFound)
+	if isNew {
+		if mode == "password" {
+			// 新用户没有密码：引导先用验证码注册并设置密码
+			writeErr(w, 400, "新用户请先使用验证码登录并设置密码")
+			return
+		}
 		u, err = s.st.CreateUser(r.Context(), req.Phone)
 		if err != nil {
 			writeErr(w, 500, "注册失败")
@@ -74,12 +87,28 @@ func (s *Server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "查询失败")
 		return
 	}
+	switch mode {
+	case "password":
+		if u.LoginPwd == "" || u.LoginPwd != s.hashPwd(req.Password) {
+			writeErr(w, 400, "手机号或密码错误（忘记密码可用验证码登录）")
+			return
+		}
+	case "code":
+		if req.Code != "1234" {
+			writeErr(w, 400, "验证码错误")
+			return
+		}
+	default:
+		writeErr(w, 400, "登录方式不支持")
+		return
+	}
 	tk, err := s.grantUser(r.Context(), u.ID)
 	if err != nil {
 		writeErr(w, 500, "会话创建失败")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"token": tk, "phone": u.Phone, "userId": u.ID, "avatar": u.Avatar, "hasPickupPwd": u.PickupPwd != ""})
+	writeJSON(w, 200, map[string]any{"token": tk, "phone": u.Phone, "userId": u.ID, "avatar": u.Avatar,
+		"hasPickupPwd": u.PickupPwd != "", "hasLoginPwd": u.LoginPwd != "", "isNew": isNew})
 }
 
 func (s *Server) handleUserLogout(w http.ResponseWriter, r *http.Request) {
@@ -143,6 +172,26 @@ func (s *Server) handleSetAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.st.SetAvatar(r.Context(), claims.refID, req.Avatar); err != nil {
+		writeErr(w, 500, "保存失败")
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// handleSetLoginPwd 设置/修改登录密码（需已登录）
+func (s *Server) handleSetLoginPwd(w http.ResponseWriter, r *http.Request) {
+	claims, ok := s.userAuthWrap(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := readJSON(r, &req); err != nil || len(req.Password) < 6 {
+		writeErr(w, 400, "登录密码至少6位")
+		return
+	}
+	if err := s.st.SetLoginPwd(r.Context(), claims.refID, s.hashPwd(req.Password)); err != nil {
 		writeErr(w, 500, "保存失败")
 		return
 	}
@@ -578,6 +627,29 @@ type pickupReq struct {
 	Password string `json:"password"`
 }
 
+// handleKioskPickup 柜机触屏端取件：公共设备无用户登录，凭 6 位取件码开柜。
+// 取件码本身即为凭证（存件成功页/我的订单展示），无需也不应要求 C 端登录。
+func (s *Server) handleKioskPickup(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := readJSON(r, &req); err != nil || len(req.Code) != 6 {
+		writeErr(w, 400, "请输入6位取件码")
+		return
+	}
+	order, err := s.st.GetOrderByCode(r.Context(), req.Code, true)
+	if err != nil || order == nil {
+		writeErr(w, 400, "取件码错误或订单已结束")
+		return
+	}
+	lk, _ := s.st.GetLocker(r.Context(), order.LockerID)
+	lockerCode := ""
+	if lk != nil {
+		lockerCode = lk.Code
+	}
+	writeJSON(w, 200, map[string]any{"orderId": order.ID, "orderNo": order.OrderNo, "lockerCode": lockerCode, "note": "校验通过，柜门已弹开"})
+}
+
 // handlePickup 取件验证：取件码/扫码/人脸/密码任一通过即开柜
 func (s *Server) handlePickup(w http.ResponseWriter, r *http.Request) {
 	claims, ok := s.userAuthWrap(w, r)
@@ -726,6 +798,46 @@ func (s *Server) settleOrder(r *http.Request, o *store.Order, method string) (*b
 }
 
 // handlePickupDone 取件关门→结算（多退少补）→柜格释放
+// doPickupDone 结算并释放柜格（共用逻辑）
+func (s *Server) doPickupDone(w http.ResponseWriter, r *http.Request, id int64) {
+	o, err := s.st.GetOrder(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeErr(w, 404, "订单不存在")
+		return
+	}
+	if err != nil || o.Status != "active" {
+		writeErr(w, 409, "订单已结束或状态不允许")
+		return
+	}
+	settle, err := s.settleOrder(r, o, "code")
+	if err != nil {
+		writeErr(w, 500, "结算失败")
+		return
+	}
+	if lk, err := s.st.GetLocker(r.Context(), o.LockerID); err == nil {
+		if settle.ExtraFen == 0 {
+			lk.Status = "idle"
+		}
+		lk.CurrentOrderID = 0
+		_ = s.st.UpdateLocker(r.Context(), lk)
+	}
+	writeJSON(w, 200, map[string]any{
+		"fee": settle.FeeFen, "coupon": settle.CouponFen, "refund": settle.RefundFen,
+		"extra": settle.ExtraFen, "kind": settle.Kind, "note": settle.Note,
+		"status": o.Status,
+	})
+}
+
+// handleKioskPickupDone 柜机端免登录结算：凭已开柜的订单 ID 关门结算
+func (s *Server) handleKioskPickupDone(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeErr(w, 400, "参数错误")
+		return
+	}
+	s.doPickupDone(w, r, id)
+}
+
 func (s *Server) handlePickupDone(w http.ResponseWriter, r *http.Request) {
 	claims, ok := s.userAuthWrap(w, r)
 	if !ok {
@@ -741,29 +853,7 @@ func (s *Server) handlePickupDone(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "订单不存在")
 		return
 	}
-	if err != nil || o.Status != "active" {
-		writeErr(w, 409, "订单已结束或状态不允许")
-		return
-	}
-	settle, err := s.settleOrder(r, o, "code")
-	if err != nil {
-		writeErr(w, 500, "结算失败")
-		return
-	}
-	// 释放柜格
-	if lk, err := s.st.GetLocker(r.Context(), o.LockerID); err == nil {
-		if settle.ExtraFen == 0 {
-			lk.Status = "idle"
-		}
-		lk.CurrentOrderID = 0
-		_ = s.st.UpdateLocker(r.Context(), lk)
-	}
-	resp := map[string]any{
-		"fee": settle.FeeFen, "coupon": settle.CouponFen, "refund": settle.RefundFen,
-		"extra": settle.ExtraFen, "kind": settle.Kind, "note": settle.Note,
-		"status": o.Status,
-	}
-	writeJSON(w, 200, resp)
+	s.doPickupDone(w, r, id)
 }
 
 // handlePayExtra 补交差额后结束订单

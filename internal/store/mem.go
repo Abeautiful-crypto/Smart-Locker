@@ -106,6 +106,16 @@ func (m *MemStore) SetAvatar(_ context.Context, userID int64, avatar string) err
 	u.Avatar = avatar
 	return nil
 }
+func (m *MemStore) SetLoginPwd(_ context.Context, userID int64, hash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[userID]
+	if !ok {
+		return ErrNotFound
+	}
+	u.LoginPwd = hash
+	return nil
+}
 
 // ---------- 员工与会话 ----------
 

@@ -22,13 +22,14 @@ const M = ["m-dash", "m-outlets", "m-monitor", "m-rules", "m-coupons", "m-orders
   await page.waitForTimeout(500);
   const login = await page.evaluate(() => {
     const box = (id) => { const e = document.getElementById(id); return e ? Math.round(e.getBoundingClientRect().width) : -1; };
-    return { codeW: box("code"), phoneW: box("phone"), sendW: box("sendCode"), appClass: document.getElementById("app").className };
+    return { codeW: box("code") >= 0 ? box("code") : box("pwd"), phoneW: box("phone"), sendW: box("sendCode") >= 0 ? box("sendCode") : box("doLogin"), appClass: document.getElementById("app").className };
   });
   const loginOK = login.codeW >= 100 && login.phoneW >= 100 && login.sendW >= 40 && login.appClass === "end-user";
   console.log((loginOK ? "[PASS]" : "[FAIL]") + " u-login 控件宽度: " + JSON.stringify(login));
   await page.screenshot({ path: "c:/Users/91526/Desktop/智能寄存柜/Smart-Locker/shots/fix-u-login.png" });
 
   // ---- C 端登录，带 token 巡检 u-* ----
+  await page.click('.login-tab[data-m="code"]'); await page.waitForTimeout(150);
   await page.fill("#phone", "13900001113");
   await page.fill("#code", "1234");
   await page.check("#agreeChk");

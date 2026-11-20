@@ -9,7 +9,7 @@ const BASE = "http://localhost:8090/";
   // 用户端打开客服页，建立用户 WS
   const user = await b.newPage();
   await user.goto(BASE + "#u-login"); await user.waitForTimeout(300);
-  await user.fill("#phone", "13900001113"); await user.fill("#code", "1234"); await user.check("#agreeChk"); await user.click("#doLogin"); await user.waitForTimeout(600);
+  await user.click('.login-tab[data-m="code"]'); await user.waitForTimeout(150); await user.fill("#phone", "13900001113"); await user.fill("#code", "1234"); await user.check("#agreeChk"); await user.click("#doLogin"); await user.waitForTimeout(600);
   await user.goto(BASE + "#u-chat"); await user.waitForTimeout(600);
   const userWS = await user.evaluate(() => {
     // 通过 Performance API 检测 ws 升级请求

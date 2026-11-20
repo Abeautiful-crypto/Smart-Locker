@@ -123,7 +123,7 @@ func (s *MySQLStore) CreateUser(ctx context.Context, phone string) (*User, error
 
 func scanUser(row *sql.Row) (*User, error) {
 	u := &User{}
-	err := row.Scan(&u.ID, &u.Phone, &u.PickupPwd, &u.Avatar, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Phone, &u.PickupPwd, &u.LoginPwd, &u.Avatar, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -131,7 +131,7 @@ func scanUser(row *sql.Row) (*User, error) {
 }
 
 func (s *MySQLStore) GetUserByPhone(ctx context.Context, phone string) (*User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,avatar,created_at FROM users WHERE phone=?", phone))
+	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,login_pwd,avatar,created_at FROM users WHERE phone=?", phone))
 }
 
 func (s *MySQLStore) SetPickupPwd(ctx context.Context, userID int64, hash string) error {
@@ -144,8 +144,13 @@ func (s *MySQLStore) SetAvatar(ctx context.Context, userID int64, avatar string)
 	return err
 }
 
+func (s *MySQLStore) SetLoginPwd(ctx context.Context, userID int64, hash string) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE users SET login_pwd=? WHERE id=?", hash, userID)
+	return err
+}
+
 func (s *MySQLStore) GetUserByID(ctx context.Context, id int64) (*User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,avatar,created_at FROM users WHERE id=?", id))
+	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,login_pwd,avatar,created_at FROM users WHERE id=?", id))
 }
 
 // CreateLocker 新建柜格

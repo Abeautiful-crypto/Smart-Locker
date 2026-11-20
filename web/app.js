@@ -270,29 +270,58 @@ function appHeader(title, backTo) {
 }
 
 routes["u-login"] = function () {
+  const mode = state.loginMode || "password";
   return appHeader("登录", "u-home") +
     '<div class="app-pad"><div class="h2">手机号登录 / 注册</div>' +
-    '<div class="card mt16"><label class="lbl">手机号</label><input class="input" id="phone" maxlength="11" placeholder="请输入11位手机号" inputmode="numeric">' +
-    '<div class="row gap8 mt12"><input class="input flex1" id="code" maxlength="6" placeholder="验证码" inputmode="numeric"><button class="btn" id="sendCode">发送验证码</button></div>' +
+    '<div class="login-tabs mt12"><button class="login-tab ' + (mode === "password" ? "on" : "") + '" data-m="password">密码登录</button>' +
+    '<button class="login-tab ' + (mode === "code" ? "on" : "") + '" data-m="code">验证码登录</button></div>' +
+    '<div class="card mt12"><label class="lbl">手机号</label><input class="input" id="phone" maxlength="11" placeholder="请输入11位手机号" inputmode="numeric">' +
+    (mode === "password"
+      ? '<label class="lbl mt12">登录密码</label><input class="input" id="pwd" type="password" placeholder="请输入登录密码">' +
+        '<div class="tiny mt5"><span class="link" id="forgotPwd">忘记密码？用验证码登录 ›</span></div>'
+      : '<div class="row gap8 mt12"><input class="input flex1" id="code" maxlength="6" placeholder="验证码" inputmode="numeric"><button class="btn" id="sendCode">发送验证码</button></div>' +
+        '<div class="faint tiny mt5">演示环境验证码固定为 1234；首次登录请用验证码，登录后可在「我的」设置密码</div>') +
     '<label class="row gap8 mt20" style="font-size:12px;color:var(--muted);align-items:flex-start;cursor:pointer"><input type="checkbox" id="agreeChk" style="margin-top:2px"><span>我已阅读并同意 <span class="link" data-action="nav" data-id="u-guide">《用户协议》</span> 与《隐私政策》</span></label>' +
-    '<button class="btn btn-primary mt20" id="doLogin">登录 / 注册</button>' +
-    '<div class="faint tiny mt20" style="text-align:center">演示环境验证码固定为 1234</div></div></div>';
+    '<button class="btn btn-primary mt20" id="doLogin">' + (mode === "password" ? "登 录" : "登录 / 注册") + '</button></div></div>';
 };
 
 document.addEventListener("click", (e) => {
+  const tab = e.target.closest(".login-tab");
+  if (tab) { state.loginMode = tab.dataset.m; render(); return; }
+  if (e.target.closest("#forgotPwd")) { state.loginMode = "code"; render(); return; }
   if (e.target.closest("#sendCode")) {
     const phone = $("#phone").value.trim();
     api("/api/user/send-code", "POST", { phone }).then(() => toast("验证码已发送（演示：1234）")).catch((err) => toast(err.message));
   }
   if (e.target.closest("#doLogin")) {
     const phone = $("#phone").value.trim();
-    const code = $("#code").value.trim();
+    const mode = state.loginMode || "password";
+    const code = mode === "code" ? ($("#code") ? $("#code").value.trim() : "") : "";
+    const password = mode === "password" ? ($("#pwd") ? $("#pwd").value : "") : "";
     const agree = $("#agreeChk").checked;
-    api("/api/user/login", "POST", { phone, code, agree }).then((r) => {
+    const body = { phone, mode, agree };
+    if (mode === "code") body.code = code;
+    else body.password = password;
+    api("/api/user/login", "POST", body).then((r) => {
       saveToken(r.token);
       if (r.avatar) { state.avatar = r.avatar; localStorage.setItem("locker_avatar", r.avatar); }
       toast("登录成功");
-      go("u-home");
+      if (!r.hasLoginPwd) {
+        // 首次用验证码登录：引导设置密码，下次即可密码登录
+        setTimeout(() => {
+          modal('<div class="bold14 mb10">设置登录密码</div><div class="faint tiny mb10">下次可用「手机号+密码」快速登录，忘记密码仍可用验证码</div>' +
+            '<input class="input" id="setLoginPwd" type="password" placeholder="至少6位登录密码">' +
+            '<button class="btn btn-primary mt12" id="setLoginPwdGo" style="width:100%">保存密码</button>' +
+            '<button class="btn mt8" id="skipPwd" style="width:100%">暂不设置</button>');
+          $("#setLoginPwdGo").onclick = async () => {
+            const p = $("#setLoginPwd").value;
+            if (p.length < 6) { toast("密码至少6位"); return; }
+            try { await api("/api/user/login-pwd", "POST", { password: p }); closeModal(); toast("密码已设置，下次可直接登录"); }
+            catch (err) { toast(err.message); }
+          };
+          $("#skipPwd").onclick = () => closeModal();
+        }, 600);
+      } else go("u-home");
     }).catch((err) => toast(err.message));
   }
 });
@@ -603,6 +632,18 @@ routes["u-mine"] = function () {
         } catch (err) { toast(err.message || "图片处理失败"); }
       };
     };
+    const lpBtn = $("#setLoginPwdEntry");
+    if (lpBtn) lpBtn.onclick = () => {
+      modal('<div class="bold14 mb10">设置登录密码</div><div class="faint tiny mb10">下次可用「手机号+密码」登录；忘记密码仍可用验证码</div>' +
+        '<input class="input" id="setLoginPwd" type="password" placeholder="至少6位登录密码">' +
+        '<button class="btn btn-primary mt12" id="setLoginPwdGo" style="width:100%">保存</button>');
+      $("#setLoginPwdGo").onclick = async () => {
+        const p = $("#setLoginPwd").value;
+        if (p.length < 6) { toast("密码至少6位"); return; }
+        try { await api("/api/user/login-pwd", "POST", { password: p }); closeModal(); toast("登录密码已设置"); }
+        catch (err) { toast(err.message); }
+      };
+    };
     const btn = $("#setPwd");
     if (btn) btn.onclick = () => {
       modal('<div class="bold14 mb10">设置取件密码</div><input class="input" id="mNewPwd" type="password" placeholder="至少6位"><button class="btn btn-primary mt12" id="mSetPwd" style="width:100%">保存</button>');
@@ -614,11 +655,13 @@ routes["u-mine"] = function () {
     };
   };
   return appHeader("我的", "u-home") +
-    '<div class="app-pad"><div class="hero-card"><div class="row"><span id="myAvatar">' + avatarHTML(state.avatar, "user-avatar") + '</span><div><div class="lbl">已登录用户</div><div class="big">优惠券 · 取件密码 · 在线客服</div></div></div>' +
-    '<button class="btn sm mt10" id="changeAvatar">切换头像 ›</button></div>' +
+    '<div class="app-pad"><div class="profile-card"><div class="profile-top"><span id="myAvatar">' + avatarHTML(state.avatar, "user-avatar") + '</span>' +
+    '<div class="profile-info"><div class="profile-name">已登录用户</div><div class="profile-sub">优惠券 · 取件码 · 在线客服</div></div>' +
+    '<button class="profile-edit" id="changeAvatar">更换头像</button></div></div>' +
     '<div class="card mt12"><div class="bold14">账户</div>' +
     '<button class="pay-row" data-action="nav" data-id="u-coupons" style="width:100%;text-align:left"><span class="muted">优惠券</span><b class="link">查看 ›</b></button>' +
     '<button class="pay-row" id="setPwd" style="width:100%;text-align:left"><span class="muted">取件密码</span><b class="link">设置 ›</b></button>' +
+    '<button class="pay-row" id="setLoginPwdEntry" style="width:100%;text-align:left"><span class="muted">登录密码</span><b class="link">设置 ›</b></button>' +
     '<button class="pay-row" data-action="nav" data-id="u-chat" style="width:100%;text-align:left;border:0"><span class="muted">在线客服</span><b class="link">咨询 ›</b></button></div>' +
     '<button class="btn mt16" id="doLogout" style="width:100%">退出登录</button></div>' + tabbar("mine");
 };
@@ -800,9 +843,14 @@ async function doKPickup() {
   if (code.length !== 6) { if (box) box.innerHTML = '<div class="k-err">请输入完整 6 位取件码</div>'; return; }
   if (box) box.innerHTML = "";
   try {
-    const r = await api("/api/orders/0/pickup", "POST", { method: "code", code });
+    const r = await api("/api/kiosk/pickup", "POST", { code });
     if (box) box.innerHTML = '<div class="card"><div class="big-ok">柜门已弹开 · 柜格 ' + esc(r.lockerCode) + '</div><button class="btn btn-primary mt12" id="kDone" style="width:100%">已取出物品，关门结算</button></div>';
-    $("#kDone").onclick = () => finishPickup(r.orderId);
+    $("#kDone").onclick = async () => {
+      try {
+        const s = await api("/api/kiosk/orders/" + r.orderId + "/pickup-done", "POST", {});
+        if (box) box.innerHTML = '<div class="big-ok">✓ 取件完成 · ' + (s.kind === "free" ? "免费时长内，已全额退款" : "结算完成") + '</div>';
+      } catch (err) { if (box) box.innerHTML = '<div class="k-err">结算失败：' + esc(err.message) + '</div>'; }
+    };
   } catch (err) {
     if (box) box.innerHTML = '<div class="k-err">✕ ' + esc(err.message) + '</div>';
     state.kCode = "";
@@ -1315,13 +1363,19 @@ function openCsPanel(uid, name) {
   };
 }
 
+// 兼容历史脏数据：早期误存 URL 编码的中文，显示时解码一次
+function decodeTicketText(s) {
+  if (!s) return s;
+  if (/%[0-9A-Fa-f]{2}/.test(s)) { try { return decodeURIComponent(s); } catch (e) {} }
+  return s;
+}
 async function loadTickets(token) {
   const data = await admApi("/api/admin/tickets?status=pending").catch(() => ({ tickets: [] }));
   const list = data.tickets || [];
   const el = $("#ticketList");
   if (el) el.innerHTML = list.length ? list.map((t) =>
     '<div class="card mb10"><div class="row" style="justify-content:space-between"><b class="mono tiny">' + esc(t.ticketNo) + '</b><span class="chip chip-warn">待处理</span></div>' +
-    '<div class="tiny mt5">' + esc(t.question) + '</div><div class="row gap8 mt8"><input class="input flex1 tk-reply" placeholder="处理回复"><button class="btn sm tk-go" data-id="' + t.id + '">结案</button></div></div>').join("")
+    '<div class="tiny mt5">' + esc(decodeTicketText(t.question)) + '</div><div class="row gap8 mt8"><input class="input flex1 tk-reply" placeholder="处理回复"><button class="btn sm tk-go" data-id="' + t.id + '">结案</button></div></div>').join("")
     : '<div class="faint tiny">暂无待处理工单</div>';
   document.querySelectorAll(".tk-go").forEach((b) => {
     b.onclick = () => {

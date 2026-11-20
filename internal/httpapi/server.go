@@ -192,6 +192,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/user/me", s.handleUserMe)
 	mux.HandleFunc("POST /api/user/pickup-pwd", s.handleSetPickupPwd)
 	mux.HandleFunc("POST /api/user/avatar", s.handleSetAvatar)
+	mux.HandleFunc("POST /api/user/login-pwd", s.handleSetLoginPwd)
 	mux.HandleFunc("GET /api/user/coupons", s.handleUserCoupons)
 	mux.HandleFunc("POST /api/user/logout", s.handleUserLogout)
 
@@ -209,6 +210,9 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/orders/{id}", s.handleOrderDetail)
 	mux.HandleFunc("POST /api/orders/{id}/report", s.handleReportProblem)
 	mux.HandleFunc("POST /api/orders/{id}/pickup", s.handlePickup)
+	// 柜机触屏端：公共设备免登录取件/结算（仅凭取件码）
+	mux.HandleFunc("POST /api/kiosk/pickup", s.handleKioskPickup)
+	mux.HandleFunc("POST /api/kiosk/orders/{id}/pickup-done", s.handleKioskPickupDone)
 	mux.HandleFunc("POST /api/orders/{id}/pickup-done", s.handlePickupDone)
 	mux.HandleFunc("POST /api/orders/{id}/pay-extra", s.handlePayExtra)
 

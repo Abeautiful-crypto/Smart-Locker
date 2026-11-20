@@ -26,22 +26,25 @@ const SHOT = "c:/Users/91526/Desktop/智能寄存柜/Smart-Locker/shots";
 
   // 2. 登录
   await page.goto(BASE + "/#u-login", { waitUntil: "load" });
+  await page.click('.login-tab[data-m="code"]'); await page.waitForTimeout(150);
   await page.fill("#phone", "13911112222");
   await page.fill("#code", "1234");
   await page.check("#agreeChk");
   await page.click("#doLogin");
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(1000);
+  // 首次验证码登录会弹"设置登录密码"，演示脚本选择跳过
+  if (await page.locator("#skipPwd").count()) { await page.click("#skipPwd"); await page.waitForTimeout(200); }
   console.log("登录后hash:", await page.evaluate(() => location.hash));
 
   // 3. 选择网点→规格
   await page.goto(BASE + "/#u-outlets", { waitUntil: "load" });
   await page.waitForTimeout(500);
   await shot("02-outlets");
-  await page.click('[data-action="outlet"]');
+  await page.locator('[data-action="outlet"]').nth(1).click(); // 选第2个网点，避免热门网点小格满
   await page.waitForTimeout(500);
   await page.goto(BASE + "/#u-spec", { waitUntil: "load" });
   await page.waitForTimeout(500);
-  await page.click('[data-size="S"]');
+  await page.click('[data-size="M"]');
   await page.waitForTimeout(300);
   await page.click("#toPay");
   await page.waitForTimeout(600);

@@ -20,6 +20,7 @@ type User struct {
 	ID        int64
 	Phone     string
 	PickupPwd string
+	LoginPwd  string // 登录密码哈希（空表示仅注册未设置）
 	Avatar    string // 头像（emoji 或短标识）
 	CreatedAt time.Time
 }
@@ -224,6 +225,7 @@ type Store interface {
 	GetUserByID(ctx context.Context, id int64) (*User, error)
 	SetPickupPwd(ctx context.Context, userID int64, hash string) error
 	SetAvatar(ctx context.Context, userID int64, avatar string) error
+	SetLoginPwd(ctx context.Context, userID int64, hash string) error
 
 	// 员工与会话
 	CreateStaff(ctx context.Context, s *Staff) error

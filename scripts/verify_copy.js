@@ -6,7 +6,7 @@ const { chromium } = require(path.join(pwDir, "index.js"));
   const ctx = await b.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
   const p = await ctx.newPage();
   await p.goto("http://localhost:8090/#u-login"); await p.waitForTimeout(300);
-  await p.fill("#phone", "13900001113"); await p.fill("#code", "1234"); await p.check("#agreeChk"); await p.click("#doLogin"); await p.waitForTimeout(2200);
+  await p.click('.login-tab[data-m="code"]'); await p.waitForTimeout(150); await p.fill("#phone", "13900001113"); await p.fill("#code", "1234"); await p.check("#agreeChk"); await p.click("#doLogin"); await p.waitForTimeout(2200);
   await p.goto("http://localhost:8090/#u-orders"); await p.waitForTimeout(500);
   await p.evaluate(() => { document.getElementById("toast-root").innerHTML = ""; });
   const code = await p.locator(".pickup-code-box b").first().innerText();

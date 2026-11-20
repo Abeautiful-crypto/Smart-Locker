@@ -14,7 +14,7 @@ const check = (name, ok, detail) => { ok ? pass++ : fail++; console.log((ok ? "[
   p.on("pageerror", (e) => errs.push(e.message));
 
   await p.goto(BASE + "#u-login"); await p.waitForTimeout(300);
-  await p.fill("#phone", "13900001113"); await p.fill("#code", "1234"); await p.check("#agreeChk"); await p.click("#doLogin"); await p.waitForTimeout(500);
+  await p.click('.login-tab[data-m="code"]'); await p.waitForTimeout(150); await p.fill("#phone", "13900001113"); await p.fill("#code", "1234"); await p.check("#agreeChk"); await p.click("#doLogin"); await p.waitForTimeout(500);
 
   // Q1 复制按钮
   await p.goto(BASE + "#u-orders"); await p.waitForTimeout(400);
