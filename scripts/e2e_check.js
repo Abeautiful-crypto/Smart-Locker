@@ -59,12 +59,20 @@ const SHOT = "c:/Users/91526/Desktop/智能寄存柜/Smart-Locker/shots";
   const code = await page.textContent("[style*='letter-spacing']").catch(() => null);
   console.log("取件码页:", code, "hash:", await page.evaluate(() => location.hash));
 
-  // 5. 订单页取件→结算
+  // 5. 订单页查看取件码 → 柜机端凭码取件+结算（用户端不再取件）
   await page.goto(BASE + "/#u-orders", { waitUntil: "load" });
   await page.waitForTimeout(600);
   await shot("05-orders");
-  await page.click(".op-done");
-  await page.waitForTimeout(800);
+  const pickupCode = await page.locator(".pickup-code-box b").first().innerText().catch(() => "");
+  console.log("订单取件码:", pickupCode);
+  const kioskResult = await page.evaluate(async (code) => {
+    const r = await fetch("/api/kiosk/pickup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+    if (!r.ok) return { ok: false, err: (await r.json()).error };
+    const pk = await r.json();
+    const s = await fetch("/api/kiosk/orders/" + pk.orderId + "/pickup-done", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    return { ok: true, settle: await s.json() };
+  }, pickupCode);
+  console.log("柜机取件结算:", JSON.stringify(kioskResult));
   await shot("06-settled");
   console.log("结算后订单页hash:", await page.evaluate(() => location.hash));
 

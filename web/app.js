@@ -179,7 +179,6 @@ document.addEventListener("click", (e) => {
     coupon: () => chooseCoupon(Number(id) || 0),
     couponSelect: () => go("u-coupon-select"),
     report: () => reportProblem(Number(id)),
-    pickupMethod: () => go("u-pickup"),
     openOutletMap: () => toast("地图为演示降级实现：显示网点列表"),
     guide: () => go("u-guide"),
     adminNav: () => go(id),
@@ -258,10 +257,10 @@ function statusChip(st) {
  *  用户端
  * ================================================================ */
 function tabbar(active) {
+  // 用户端不提供取件入口：取件统一在柜机触屏端凭取件码完成
   return '<div class="tabbar">' +
     '<button class="' + (active === "home" ? "on" : "") + '" data-action="nav" data-id="u-home">' + I.box + "<span>首页</span></button>" +
     '<button class="' + (active === "orders" ? "on" : "") + '" data-action="nav" data-id="u-orders">' + I.list + "<span>订单</span></button>" +
-    '<button class="' + (active === "pickup" ? "on" : "") + '" data-action="nav" data-id="u-pickup">' + I.key + "<span>取件</span></button>" +
     '<button class="' + (active === "mine" ? "on" : "") + '" data-action="nav" data-id="u-mine">' + I.user + "<span>我的</span></button>" +
     "</div>";
 }
@@ -336,7 +335,8 @@ routes["u-home"] = async function () {
     '<div class="greeting"><div class="hi">欢迎使用智能寄存</div><div class="location" data-action="city" style="cursor:pointer">' + I.pin + " " + esc(cur.city) + ' <span class="faint tiny">切换 ›</span></div></div>' +
     '<div class="hero-card"><div class="lbl">' + esc(cur.city) + ' · 空闲柜格</div><div class="big mono">' + cur.idle + ' <span style="font-size:14px;font-weight:600">格</span></div><div style="font-size:11.5px;opacity:.85">共 ' + outlets.length + ' 个网点可用</div></div>' +
     '<div class="hero-actions"><button class="hero-act" data-action="spec"><div class="ic">' + I.box + '</div><b>立即存件</b><span>选柜型 · 在线支付</span></button>' +
-    '<button class="hero-act" data-action="nav" data-id="u-pickup"><div class="ic">' + I.key + '</div><b>我要取件</b><span>取件码 / 扫码 / 人脸</span></button></div>' +
+    '<button class="hero-act" data-action="nav" data-id="u-orders"><div class="ic">' + I.list + '</div><b>我的订单</b><span>查看取件码 / 补交</span></button></div>' +
+    '<div class="faint tiny mt8" style="text-align:center">取件请到柜机触屏端，输入订单中的 6 位取件码</div>' +
     '<div class="section"><div class="section-h"><b>附近网点</b><span class="link" data-action="nav" data-id="u-outlets">全部 ›</span></div>' +
     outlets.slice(0, 3).map((o) => outletRow(o)).join("") + "</div>" +
     '<div class="card mt12" data-action="nav" data-id="u-chat" style="display:flex;align-items:center;gap:11px;cursor:pointer"><div style="width:34px;height:34px;border-radius:10px;background:var(--bg-2);display:grid;place-items:center">' + I.chat + '</div>' +
@@ -490,8 +490,10 @@ function orderCard(o) {
     '<div class="faint tiny mt5">柜型 ' + sizeName[o.size] + " · " + (o.payMode === "deposit" ? "押金模式" : "预付模式") + (o.lockerCode ? " · 柜格 " + esc(o.lockerCode) : "") + "</div>" +
     (o.code ? '<div class="pickup-code-box mt10"><span class="tiny faint">取件码</span><b class="mono">' + esc(o.code) + '</b><button class="btn sm copy-code" data-code="' + esc(o.code) + '">复制</button></div>' : "") +
     (active
-      ? '<div class="row gap8 mt10"><button class="btn flex1 op-pickup" data-oid="' + o.id + '">取件</button><button class="btn flex1 op-report" data-oid="' + o.id + '">上报柜格异常</button></div>'
-        + '<div class="row gap8 mt8"><button class="btn flex1 op-done" data-oid="' + o.id + '">已取出物品，关门结算</button></div>'
+      ? '<div class="faint tiny mt8">' + (Number(o.extra) > 0 ? '已结算 · 需补交 ¥' + yuan2(o.extra) + '（请在柜机端取件后于此补交）' : '寄存中 · 请到柜机端凭取件码取件') + '</div>' +
+        '<div class="row gap8 mt10">' +
+        (Number(o.extra) > 0 ? '<button class="btn btn-primary flex1 op-extra" data-oid="' + o.id + '">补交 ¥' + yuan2(o.extra) + '</button>' : '') +
+        '<button class="btn flex1 op-report" data-oid="' + o.id + '">上报柜格异常</button></div>'
       : '<div class="faint tiny mt8">费用 ¥' + yuan2(o.fee) + (o.refund ? " · 退款 ¥" + yuan2(o.refund) : "") + (o.extra ? " · 补交 ¥" + yuan2(o.extra) : "") + (o.couponDiscount ? " · 券抵 ¥" + yuan2(o.couponDiscount) : "") +
         (o.settleNote ? "<br>" + esc(o.settleNote) : "") + "</div>") +
     "</div>";
@@ -513,8 +515,12 @@ document.addEventListener("click", (e) => {
     });
     return;
   }
-  const pk = e.target.closest(".op-pickup");
-  if (pk) { state.pickOrderId = Number(pk.dataset.oid); go("u-pickup"); return; }
+  const ex = e.target.closest(".op-extra");
+  if (ex) {
+    const id = Number(ex.dataset.oid);
+    api("/api/orders/" + id + "/pay-extra", "POST", {}).then(() => { toast("补交完成，订单已结束"); render(); }).catch((err) => toast(err.message));
+    return;
+  }
   const rp = e.target.closest(".op-report");
   if (rp) { reportProblem(Number(rp.dataset.oid)); return; }
   const dn = e.target.closest(".op-done");
@@ -535,71 +541,8 @@ document.addEventListener("click", (e) => {
   }
 });
 
-routes["u-pickup"] = function () {
-  const oid = state.pickOrderId || 0;
-  return appHeader("取件", "u-orders") +
-    '<div class="app-pad"><div class="h2">取件开柜</div>' +
-    (oid ? '<div class="faint tiny mt5">目标订单 #' + oid + '　<span id="changeOrder" class="link" style="cursor:pointer">切换订单</span></div>' : "") +
-    '<div class="card mt16"><label class="lbl">取件码开柜</label><input class="input mono" id="pickCode" maxlength="6" placeholder="6位取件码" inputmode="numeric">' +
-    '<button class="btn btn-primary mt12" id="pickByCode" style="width:100%">开柜</button></div>' +
-    '<div class="card mt12"><div class="bold14 mb10">其他取件方式</div>' +
-    '<button class="btn" id="pickByScan" style="width:100%;margin-bottom:8px">手机扫码取件（默认）</button>' +
-    '<button class="btn" id="pickByFace" style="width:100%;margin-bottom:8px">人脸识别取件（演示）</button>' +
-    '<button class="btn" id="pickByPwd" style="width:100%">手机号+密码取件</button></div>' +
-    '<div id="pickResult"></div></div>' + tabbar("pickup");
-};
-
-function pickupErr(msg) {
-  const box = $("#pickResult");
-  if (box) box.innerHTML = '<div class="card mt12" style="border-color:var(--danger,#d94841)"><div class="bold14" style="color:#c62f28">✕ ' + esc(msg) + '</div><div class="faint tiny mt5">请在“我的订单”查看正确取件码，或换用扫码/人脸方式</div></div>';
-}
-
-document.addEventListener("click", (e) => {
-  const done = (r, oid) => {
-    $("#pickResult").innerHTML = '<div class="card mt12"><div class="big-ok">校验通过，柜门已弹开</div><div class="pay-row mt10"><span class="muted">柜格</span><b class="mono">' + esc(r.lockerCode) + '</b></div>' +
-      '<button class="btn btn-primary mt12" id="doneClose" style="width:100%">已取出物品，关门结算</button></div>';
-    $("#doneClose").onclick = () => finishPickup(oid || r.orderId);
-  };
-  if (e.target.closest("#changeOrder")) { state.pickOrderId = 0; go("u-orders"); return; }
-  const doPickup = (payload) => {
-    const oid = state.pickOrderId || 0;
-    const path = oid ? "/api/orders/" + oid + "/pickup" : "/api/orders/0/pickup";
-    const pb = $("#pickResult");
-    if (pb) pb.innerHTML = "";
-    return api(path, "POST", payload).then((r) => done(r, oid)).catch((err) => pickupErr(err.message));
-  };
-  if (e.target.closest("#pickByCode")) {
-    const code = $("#pickCode").value.trim();
-    if (code.length !== 6) { pickupErr("请输入 6 位取件码"); return; }
-    doPickup({ method: "code", code });
-  }
-  if (e.target.closest("#pickByScan")) doPickup({ method: "scan" });
-  if (e.target.closest("#pickByFace")) doPickup({ method: "face" });
-  if (e.target.closest("#pickByPwd")) {
-    modal('<div class="bold14 mb10">取件密码</div><input class="input" id="mPwd" type="password" placeholder="6位以上取件密码"><button class="btn btn-primary mt12" id="mPwdGo" style="width:100%">开柜</button>');
-    $("#mPwdGo").onclick = () => {
-      const pwd = $("#mPwd").value;
-      closeModal();
-      doPickup({ method: "password", password: pwd });
-    };
-  }
-});
-
-async function finishPickup(orderId) {
-  const r = await api("/api/orders/" + orderId + "/pickup-done", "POST", {}).catch((err) => { toast(err.message); return null; });
-  if (!r) return;
-  if (Number(r.extra) > 0) {
-    modal('<div class="bold14">需补交差额</div><div class="mt10">需补交 <b class="price">¥' + yuan2(r.extra) + "</b></div>" +
-      '<button class="btn btn-primary mt16" id="payExtra2" style="width:100%">模拟补交支付</button>');
-    $("#payExtra2").onclick = async () => {
-      await api("/api/orders/" + orderId + "/pay-extra", "POST", {});
-      closeModal(); toast("补交完成，订单结束"); go("u-orders");
-    };
-  } else {
-    toast("结算完成：" + (r.kind === "free" ? "免费时长内，全额退款 ¥" + yuan2(r.refund) : r.kind === "refund" ? "退款 ¥" + yuan2(r.refund) : "无需补退"));
-    go("u-orders");
-  }
-}
+// 用户端不提供取件流程：取件统一在柜机触屏端凭 6 位取件码完成。
+// 用户端仅保留：查看取件码（订单卡片）、补交差额、上报异常。
 
 routes["u-mine"] = function () {
   state._after = () => {
@@ -849,7 +792,9 @@ async function doKPickup() {
     $("#kDone").onclick = async () => {
       try {
         const s = await api("/api/kiosk/orders/" + r.orderId + "/pickup-done", "POST", {});
-        if (box) box.innerHTML = '<div class="big-ok">✓ 取件完成 · ' + (s.kind === "free" ? "免费时长内，已全额退款" : "结算完成") + '</div>';
+        if (box) box.innerHTML = Number(s.extra) > 0
+          ? '<div class="k-err">取件完成，实际费用超出预付 ¥' + yuan2(s.extra) + '，请在用户端订单中完成补交后订单才会结束</div>'
+          : '<div class="big-ok">✓ 取件完成 · ' + (s.kind === "free" ? "免费时长内，已全额退款" : "结算完成，订单已结束") + '</div>';
       } catch (err) { if (box) box.innerHTML = '<div class="k-err">结算失败：' + esc(err.message) + '</div>'; }
     };
   } catch (err) {
