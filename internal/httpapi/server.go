@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,6 +79,17 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// decodePercentText 解码形如 %E5%AF%84... 的历史脏数据；无 %XX 则原样返回。
+func decodePercentText(s string) string {
+	if !strings.Contains(s, "%") {
+		return s
+	}
+	if decoded, err := url.QueryUnescape(s); err == nil {
+		return decoded
+	}
+	return s
 }
 
 func readJSON(r *http.Request, v any) error {

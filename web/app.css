@@ -184,7 +184,10 @@
 .wx-chat { flex: 1; display: flex; flex-direction: column; min-width: 0; background: #F5F5F2; }
 .wx-chat-head { padding: 10px 16px; background: var(--surface); border-bottom: 2px solid var(--ink); display: flex; align-items: center; }
 .wx-msgs { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-height: 300px; max-height: 460px; }
-.wx-input-row { display: flex; gap: 8px; padding: 10px; background: var(--surface); border-top: 2px solid var(--ink); }
+.wx-input-row { display: flex; gap: 8px; padding: 10px; background: var(--surface); border-top: 2px solid var(--ink); align-items: center; }
+/* 客服输入框不是 .row，需单独覆盖原型的 .btn{width:100%}，否则发送键撑满整行 */
+.wx-input-row .btn { width: auto; flex: 0 0 auto; padding: 8px 20px; align-self: center; }
+.wx-input-row .input { min-width: 0; }
 /* 微信风格：自己在右（黄），对方在左（白），系统居中（灰） */
 .chat-bubble { max-width: 72%; padding: 8px 12px; border-radius: 10px; border: 2px solid var(--ink); background: var(--surface); align-self: flex-start; }
 .chat-bubble.me { background: #FFE9A8; align-self: flex-end; }

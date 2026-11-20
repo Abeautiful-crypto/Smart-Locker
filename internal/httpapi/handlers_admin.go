@@ -1228,9 +1228,11 @@ func (s *Server) handleAdminTickets(w http.ResponseWriter, r *http.Request) {
 		if u, err := s.st.GetUserByID(r.Context(), t.UserID); err == nil {
 			user = maskPhone(u.Phone)
 		}
+		// 兼容历史脏数据：早期误把 URL 编码的中文写入库，返回时解码一次
+		question := decodePercentText(t.Question)
 		m := map[string]any{
-			"id": t.ID, "ticketNo": t.TicketNo, "user": user, "question": t.Question,
-			"category": t.Category, "status": t.Status, "reply": t.Reply,
+			"id": t.ID, "ticketNo": t.TicketNo, "user": user, "question": question,
+			"category": t.Category, "status": t.Status, "reply": decodePercentText(t.Reply),
 			"time": t.CreatedAt.Format("2006-01-02 15:04"),
 		}
 		out = append(out, m)
