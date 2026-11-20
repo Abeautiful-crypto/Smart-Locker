@@ -60,7 +60,7 @@ func (m *MemStore) CreateUser(_ context.Context, phone string) (*User, error) {
 			return nil, ErrConflict
 		}
 	}
-	u := &User{ID: m.nextID(), Phone: phone, CreatedAt: time.Now()}
+	u := &User{ID: m.nextID(), Phone: phone, LoginPwd: DefaultLoginPwdHash, CreatedAt: time.Now()}
 	m.users[u.ID] = u
 	return cloneUser(u), nil
 }

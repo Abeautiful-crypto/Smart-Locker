@@ -16,6 +16,10 @@ var ErrConflict = errors.New("conflict")
 // ErrNoFreeLocker 表示无可用柜格
 var ErrNoFreeLocker = errors.New("no free locker")
 
+// DefaultLoginPwdHash 演示环境统一初始登录密码 "123456" 的 SHA-256 值。
+// 新注册用户默认写入；历史用户由迁移 007 统一刷入。
+const DefaultLoginPwdHash = "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92"
+
 type User struct {
 	ID        int64
 	Phone     string

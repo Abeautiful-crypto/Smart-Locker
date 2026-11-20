@@ -278,6 +278,7 @@ routes["u-login"] = function () {
     '<div class="card mt12"><label class="lbl">手机号</label><input class="input" id="phone" maxlength="11" placeholder="请输入11位手机号" inputmode="numeric">' +
     (mode === "password"
       ? '<label class="lbl mt12">登录密码</label><input class="input" id="pwd" type="password" placeholder="请输入登录密码">' +
+        '<div class="faint tiny mt5">演示环境所有用户初始密码：123456</div>' +
         '<div class="tiny mt5"><span class="link" id="forgotPwd">忘记密码？用验证码登录 ›</span></div>'
       : '<div class="row gap8 mt12"><input class="input flex1" id="code" maxlength="6" placeholder="验证码" inputmode="numeric"><button class="btn" id="sendCode">发送验证码</button></div>' +
         '<div class="faint tiny mt5">演示环境验证码固定为 1234；首次登录请用验证码，登录后可在「我的」设置密码</div>') +

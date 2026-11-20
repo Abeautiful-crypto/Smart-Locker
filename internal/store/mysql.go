@@ -110,7 +110,7 @@ func (s *MySQLStore) Close() error { return s.db.Close() }
 // ---------- 用户 ----------
 
 func (s *MySQLStore) CreateUser(ctx context.Context, phone string) (*User, error) {
-	res, err := s.db.ExecContext(ctx, "INSERT INTO users(phone) VALUES(?)", phone)
+	res, err := s.db.ExecContext(ctx, "INSERT INTO users(phone,login_pwd) VALUES(?,?)", phone, DefaultLoginPwdHash)
 	if err != nil {
 		if isDup(err) {
 			return nil, ErrConflict
@@ -118,7 +118,7 @@ func (s *MySQLStore) CreateUser(ctx context.Context, phone string) (*User, error
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
-	return &User{ID: id, Phone: phone, CreatedAt: time.Now()}, nil
+	return &User{ID: id, Phone: phone, LoginPwd: DefaultLoginPwdHash, CreatedAt: time.Now()}, nil
 }
 
 func scanUser(row *sql.Row) (*User, error) {
