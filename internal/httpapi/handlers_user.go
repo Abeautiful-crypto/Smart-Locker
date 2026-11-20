@@ -133,8 +133,13 @@ func (s *Server) handleSetAvatar(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Avatar string `json:"avatar"`
 	}
-	if err := readJSON(r, &req); err != nil || len([]rune(req.Avatar)) == 0 || len([]rune(req.Avatar)) > 4 {
-		writeErr(w, 400, "头像需为1-4个字符")
+	if err := readJSON(r, &req); err != nil || req.Avatar == "" {
+		writeErr(w, 400, "头像不能为空")
+		return
+	}
+	// 支持 emoji（≤4 字符）或压缩后的图片 data URL（VARCHAR(16000) 约 12KB）
+	if len(req.Avatar) > 12*1024 || (len([]rune(req.Avatar)) > 4 && !strings.HasPrefix(req.Avatar, "data:image/")) {
+		writeErr(w, 400, "头像格式不正确或过大")
 		return
 	}
 	if err := s.st.SetAvatar(r.Context(), claims.refID, req.Avatar); err != nil {

@@ -67,6 +67,36 @@ async function copyText(text) {
     return ok;
   } catch (e) { return false; }
 }
+// 头像渲染：图片 data URL 用 <img>，否则按 emoji/字符显示
+function avatarHTML(av, cls) {
+  const a = av || "🙂";
+  const c = cls || "wx-avatar";
+  const attr = ' data-avatar="' + esc(a) + '"';
+  return a.indexOf("data:image/") === 0
+    ? '<img class="' + c + '" src="' + a + '" alt="头像"' + attr + '>'
+    : '<div class="' + c + '"' + attr + '>' + esc(a) + '</div>';
+}
+// 本地图片压缩为 128x128 JPEG data URL（控制体积，便于存库与传输）
+function imageToAvatar(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("读取图片失败"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("图片解析失败"));
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 128; canvas.height = 128;
+        const ctx = canvas.getContext("2d");
+        const side = Math.min(img.width, img.height);
+        ctx.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, 128, 128);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 function saveToken(tk) { localStorage.setItem("locker_token", tk || ""); }
 function hasToken() { return !!localStorage.getItem("locker_token"); }
 
@@ -441,7 +471,16 @@ document.addEventListener("click", (e) => {
   const cp = e.target.closest(".copy-code");
   if (cp) {
     const txt = cp.dataset.code || "";
-    copyText(txt).then((ok) => toast(ok ? "取件码 " + txt + " 已复制" : "取件码：" + txt));
+    copyText(txt).then((ok) => {
+      toast(ok ? "✓ 复制成功！取件码 " + txt + " 已复制到剪贴板" : "取件码：" + txt + "（请手动复制）", 3000);
+      if (ok) {
+        const old = cp.textContent;
+        cp.textContent = "✓ 已复制";
+        cp.style.background = "#2E7D32";
+        cp.style.color = "#fff";
+        setTimeout(() => { if (cp.isConnected) { cp.textContent = old; cp.style.background = ""; cp.style.color = ""; } }, 1800);
+      }
+    });
     return;
   }
   const pk = e.target.closest(".op-pickup");
@@ -536,19 +575,33 @@ routes["u-mine"] = function () {
   state._after = () => {
     const av = $("#changeAvatar");
     if (av) av.onclick = () => {
-      modal('<div class="bold14 mb10">选择头像</div><div class="avatar-picker">' +
-        AVATARS.map((a) => '<button class="avatar-opt ' + (a === state.avatar ? "on" : "") + '" data-a="' + a + '">' + a + '</button>').join("") + '</div>');
-      document.querySelectorAll(".avatar-opt").forEach((b) => {
-        b.onclick = async () => {
-          const a = b.dataset.a;
-          state.avatar = a;
-          localStorage.setItem("locker_avatar", a);
-          $("#myAvatar").textContent = a;
-          closeModal();
-          try { await api("/api/user/avatar", "POST", { avatar: a }); toast("头像已更新"); }
-          catch (err) { toast("头像已在本地保存"); }
-        };
-      });
+      const saveAvatar = async (a) => {
+        state.avatar = a;
+        localStorage.setItem("locker_avatar", a);
+        const box = $("#myAvatar");
+        if (box) box.innerHTML = avatarHTML(a, "user-avatar");
+        closeModal();
+        try { await api("/api/user/avatar", "POST", { avatar: a }); toast("✓ 头像已更新"); }
+        catch (err) { toast("头像已在本地保存"); }
+      };
+      modal('<div class="bold14 mb10">更换头像</div>' +
+        '<button class="btn btn-primary mt8" id="uploadAvatarBtn" style="width:100%">📷 上传本地图片作为头像</button>' +
+        '<input type="file" id="avatarFile" accept="image/*" style="display:none">' +
+        '<div class="faint tiny mt10">或选择一个表情头像：</div>' +
+        '<div class="avatar-picker">' + AVATARS.map((a) => '<button class="avatar-opt ' + (a === state.avatar ? "on" : "") + '" data-a="' + a + '">' + a + '</button>').join("") + '</div>');
+      document.querySelectorAll(".avatar-opt").forEach((b) => { b.onclick = () => saveAvatar(b.dataset.a); });
+      $("#uploadAvatarBtn").onclick = () => $("#avatarFile").click();
+      $("#avatarFile").onchange = async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        if (!file.type.startsWith("image/")) { toast("请选择图片文件"); return; }
+        if (file.size > 5 * 1024 * 1024) { toast("图片请小于 5MB"); return; }
+        toast("正在处理图片…");
+        try {
+          const dataURL = await imageToAvatar(file);
+          await saveAvatar(dataURL);
+        } catch (err) { toast(err.message || "图片处理失败"); }
+      };
     };
     const btn = $("#setPwd");
     if (btn) btn.onclick = () => {
@@ -561,7 +614,7 @@ routes["u-mine"] = function () {
     };
   };
   return appHeader("我的", "u-home") +
-    '<div class="app-pad"><div class="hero-card"><div class="row"><div class="user-avatar" id="myAvatar">' + esc(state.avatar) + '</div><div><div class="lbl">已登录用户</div><div class="big">优惠券 · 取件密码 · 在线客服</div></div></div>' +
+    '<div class="app-pad"><div class="hero-card"><div class="row"><span id="myAvatar">' + avatarHTML(state.avatar, "user-avatar") + '</span><div><div class="lbl">已登录用户</div><div class="big">优惠券 · 取件密码 · 在线客服</div></div></div>' +
     '<button class="btn sm mt10" id="changeAvatar">切换头像 ›</button></div>' +
     '<div class="card mt12"><div class="bold14">账户</div>' +
     '<button class="pay-row" data-action="nav" data-id="u-coupons" style="width:100%;text-align:left"><span class="muted">优惠券</span><b class="link">查看 ›</b></button>' +
@@ -1158,13 +1211,13 @@ async function refreshCsList() {
   if (!data) return;
   const sessions = data.sessions || [];
   box.innerHTML = sessions.length ? sessions.map((s) =>
-    '<div class="wx-contact ' + (s.userId === csCurrentUid ? "on" : "") + '" data-uid="' + s.userId + '">' +
-    '<div class="wx-avatar">' + esc(s.avatar || "🙂") + '</div>' +
+    '<div class="wx-contact ' + (s.userId === csCurrentUid ? "on" : "") + '" data-uid="' + s.userId + '" data-avatar="' + esc(s.avatar || "🙂") + '">' +
+    avatarHTML(s.avatar, "wx-avatar") +
     '<div class="wx-contact-main"><div class="row"><b>' + esc(s.userName || ("用户" + s.userId)) + '</b><span class="tiny faint ml-auto">' + esc(s.updatedAt || "") + '</span></div>' +
     '<div class="tiny faint">' + (s.state === "agent" ? "● 接待中" : s.state === "waiting" ? "● 排队中" : "智能客服会话") + '</div></div></div>').join("")
     : '<div class="faint tiny" style="padding:16px">暂无用户会话</div>';
   box.querySelectorAll(".wx-contact").forEach((el) => {
-    el.onclick = () => openCsChat(Number(el.dataset.uid), el.querySelector("b").textContent, el.querySelector(".wx-avatar").textContent);
+    el.onclick = () => openCsChat(Number(el.dataset.uid), el.querySelector("b").textContent, el.dataset.avatar);
   });
 }
 
@@ -1190,7 +1243,7 @@ function openCsChat(uid, name, avatar) {
   const panel = $("#wxChat");
   if (!panel) return;
   panel.innerHTML =
-    '<div class="wx-chat-head"><span class="wx-avatar">' + esc(avatar || "🙂") + '</span><b class="ml8">' + esc(name) + '</b><span class="tiny faint ml-auto">用户ID ' + uid + '</span></div>' +
+    '<div class="wx-chat-head">' + avatarHTML(avatar, "wx-avatar") + '<b class="ml8">' + esc(name) + '</b><span class="tiny faint ml-auto">用户ID ' + uid + '</span></div>' +
     '<div id="wxMsgs" class="wx-msgs"></div>' +
     '<div class="wx-input-row"><input class="input flex1" id="wxInput" placeholder="发消息…（Enter 发送）"><button class="btn btn-primary" id="wxSend">发送</button></div>';
   const send = async () => {
