@@ -1202,6 +1202,7 @@ func (s *Server) handleAdminCSReply(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.st.SetChatState(r.Context(), req.UserID, "agent")
 	_ = s.st.AppendMessage(r.Context(), &store.ChatMessage{UserID: req.UserID, Sender: "agent", Content: req.Content, Channel: "websocket"})
+	notifyUserMessage(req.UserID, "agent", req.Content)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

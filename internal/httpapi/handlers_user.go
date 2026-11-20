@@ -880,6 +880,7 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	_ = s.st.AppendMessage(ctx, &store.ChatMessage{UserID: claims.refID, Sender: "user", Content: req.Content, Channel: "http"})
+	notifyUserMessage(claims.refID, "user", req.Content)
 
 	cs, _ := s.st.GetChatSession(ctx, claims.refID)
 	if cs.State == "agent" {

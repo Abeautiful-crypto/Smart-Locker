@@ -212,6 +212,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/orders/{id}/pay-extra", s.handlePayExtra)
 
 	// 在线客服
+	mux.HandleFunc("GET /api/ws/chat", s.handleUserWS)
+	mux.HandleFunc("GET /api/admin/ws/chat", s.handleAdminWS)
 	mux.HandleFunc("GET /api/chat/state", s.handleChatState)
 	mux.HandleFunc("POST /api/chat/send", s.handleChatSend)
 	mux.HandleFunc("POST /api/chat/transfer", s.handleChatTransfer)
