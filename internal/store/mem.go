@@ -96,6 +96,16 @@ func (m *MemStore) SetPickupPwd(_ context.Context, userID int64, hash string) er
 	u.PickupPwd = hash
 	return nil
 }
+func (m *MemStore) SetAvatar(_ context.Context, userID int64, avatar string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[userID]
+	if !ok {
+		return ErrNotFound
+	}
+	u.Avatar = avatar
+	return nil
+}
 
 // ---------- 员工与会话 ----------
 

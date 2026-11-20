@@ -191,6 +191,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/user/login", s.handleUserLogin)
 	mux.HandleFunc("GET /api/user/me", s.handleUserMe)
 	mux.HandleFunc("POST /api/user/pickup-pwd", s.handleSetPickupPwd)
+	mux.HandleFunc("POST /api/user/avatar", s.handleSetAvatar)
 	mux.HandleFunc("GET /api/user/coupons", s.handleUserCoupons)
 	mux.HandleFunc("POST /api/user/logout", s.handleUserLogout)
 

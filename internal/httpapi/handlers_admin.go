@@ -1132,11 +1132,12 @@ func (s *Server) handleAdminCSSessions(w http.ResponseWriter, r *http.Request) {
 	pending, _ := s.st.ListTickets(r.Context(), "pending")
 	out := []map[string]any{}
 	for _, cs := range sessions {
-		name := ""
+		name, avatar := "", ""
 		if u, err := s.st.GetUserByID(r.Context(), cs.UserID); err == nil {
 			name = maskPhone(u.Phone)
+			avatar = u.Avatar
 		}
-		out = append(out, map[string]any{"userId": cs.UserID, "userName": name, "state": cs.State,
+		out = append(out, map[string]any{"userId": cs.UserID, "userName": name, "avatar": avatar, "state": cs.State,
 			"updatedAt": cs.UpdatedAt.Format("2006-01-02 15:04:05"), "online": cs.State != "bot"})
 	}
 	writeJSON(w, 200, map[string]any{"sessions": out, "pendingTickets": len(pending)})

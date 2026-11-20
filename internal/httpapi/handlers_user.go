@@ -79,7 +79,7 @@ func (s *Server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "会话创建失败")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"token": tk, "phone": u.Phone, "userId": u.ID, "hasPickupPwd": u.PickupPwd != ""})
+	writeJSON(w, 200, map[string]any{"token": tk, "phone": u.Phone, "userId": u.ID, "avatar": u.Avatar, "hasPickupPwd": u.PickupPwd != ""})
 }
 
 func (s *Server) handleUserLogout(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +118,26 @@ func (s *Server) handleSetPickupPwd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.st.SetPickupPwd(r.Context(), claims.refID, s.hashPwd(req.Password)); err != nil {
+		writeErr(w, 500, "保存失败")
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// handleSetAvatar 设置用户头像（emoji 或短标识）
+func (s *Server) handleSetAvatar(w http.ResponseWriter, r *http.Request) {
+	claims, ok := s.userAuthWrap(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Avatar string `json:"avatar"`
+	}
+	if err := readJSON(r, &req); err != nil || len([]rune(req.Avatar)) == 0 || len([]rune(req.Avatar)) > 4 {
+		writeErr(w, 400, "头像需为1-4个字符")
+		return
+	}
+	if err := s.st.SetAvatar(r.Context(), claims.refID, req.Avatar); err != nil {
 		writeErr(w, 500, "保存失败")
 		return
 	}

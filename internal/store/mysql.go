@@ -67,6 +67,11 @@ func (s *MySQLStore) Migrate(ctx context.Context, dir string) error {
 		}
 		for _, stmt := range splitSQL(string(content)) {
 			if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+				// 重复列/重复索引属幂等迁移的正常情况，忽略
+				msg := err.Error()
+				if strings.Contains(msg, "Duplicate column") || strings.Contains(msg, "Duplicate key") || strings.Contains(msg, "already exists") {
+					continue
+				}
 				return fmt.Errorf("执行 %s: %w", f, err)
 			}
 		}
@@ -118,7 +123,7 @@ func (s *MySQLStore) CreateUser(ctx context.Context, phone string) (*User, error
 
 func scanUser(row *sql.Row) (*User, error) {
 	u := &User{}
-	err := row.Scan(&u.ID, &u.Phone, &u.PickupPwd, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Phone, &u.PickupPwd, &u.Avatar, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -126,7 +131,7 @@ func scanUser(row *sql.Row) (*User, error) {
 }
 
 func (s *MySQLStore) GetUserByPhone(ctx context.Context, phone string) (*User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,created_at FROM users WHERE phone=?", phone))
+	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,avatar,created_at FROM users WHERE phone=?", phone))
 }
 
 func (s *MySQLStore) SetPickupPwd(ctx context.Context, userID int64, hash string) error {
@@ -134,8 +139,13 @@ func (s *MySQLStore) SetPickupPwd(ctx context.Context, userID int64, hash string
 	return err
 }
 
+func (s *MySQLStore) SetAvatar(ctx context.Context, userID int64, avatar string) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE users SET avatar=? WHERE id=?", avatar, userID)
+	return err
+}
+
 func (s *MySQLStore) GetUserByID(ctx context.Context, id int64) (*User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,created_at FROM users WHERE id=?", id))
+	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,avatar,created_at FROM users WHERE id=?", id))
 }
 
 // CreateLocker 新建柜格
