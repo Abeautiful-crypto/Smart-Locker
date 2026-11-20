@@ -89,6 +89,7 @@ window.addEventListener("hashchange", render);
 
 function render() {
   stopChatPoll();
+  if (state._beforeRender) { state._beforeRender(); state._beforeRender = null; }
   let v = currentView();
   // 独立端口只允许访问本端页面，跨端 hash 自动回到本端首页
   if (!endAllowed(v)) {
@@ -403,6 +404,7 @@ function orderCard(o) {
     '<div class="row" style="justify-content:space-between"><b>订单 ' + esc(o.orderNo) + "</b>" +
     '<span class="chip ' + (active ? "chip-ok" : "") + '">' + (active ? "进行中" : "已结束") + "</span></div>" +
     '<div class="faint tiny mt5">柜型 ' + sizeName[o.size] + " · " + (o.payMode === "deposit" ? "押金模式" : "预付模式") + (o.lockerCode ? " · 柜格 " + esc(o.lockerCode) : "") + "</div>" +
+    (o.code ? '<div class="pickup-code-box mt10"><span class="tiny faint">取件码</span><b class="mono">' + esc(o.code) + '</b><button class="btn sm copy-code" data-code="' + esc(o.code) + '">复制</button></div>' : "") +
     (active
       ? '<div class="row gap8 mt10"><button class="btn flex1 op-pickup" data-oid="' + o.id + '">取件</button><button class="btn flex1 op-report" data-oid="' + o.id + '">上报柜格异常</button></div>'
         + '<div class="row gap8 mt8"><button class="btn flex1 op-done" data-oid="' + o.id + '">已取出物品，关门结算</button></div>'
@@ -412,6 +414,13 @@ function orderCard(o) {
 }
 
 document.addEventListener("click", (e) => {
+  const cp = e.target.closest(".copy-code");
+  if (cp) {
+    const txt = cp.dataset.code || "";
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(() => toast("取件码已复制")).catch(() => toast("取件码：" + txt));
+    else toast("取件码：" + txt);
+    return;
+  }
   const pk = e.target.closest(".op-pickup");
   if (pk) { state.pickOrderId = Number(pk.dataset.oid); go("u-pickup"); return; }
   const rp = e.target.closest(".op-report");
@@ -435,16 +444,23 @@ document.addEventListener("click", (e) => {
 });
 
 routes["u-pickup"] = function () {
-  return appHeader("取件", "u-home") +
+  const oid = state.pickOrderId || 0;
+  return appHeader("取件", "u-orders") +
     '<div class="app-pad"><div class="h2">取件开柜</div>' +
+    (oid ? '<div class="faint tiny mt5">目标订单 #' + oid + '　<span id="changeOrder" class="link" style="cursor:pointer">切换订单</span></div>' : "") +
     '<div class="card mt16"><label class="lbl">取件码开柜</label><input class="input mono" id="pickCode" maxlength="6" placeholder="6位取件码" inputmode="numeric">' +
     '<button class="btn btn-primary mt12" id="pickByCode" style="width:100%">开柜</button></div>' +
     '<div class="card mt12"><div class="bold14 mb10">其他取件方式</div>' +
     '<button class="btn" id="pickByScan" style="width:100%;margin-bottom:8px">手机扫码取件（默认）</button>' +
     '<button class="btn" id="pickByFace" style="width:100%;margin-bottom:8px">人脸识别取件（演示）</button>' +
     '<button class="btn" id="pickByPwd" style="width:100%">手机号+密码取件</button></div>' +
-    '<div id="pickResult"></div></div>';
+    '<div id="pickResult"></div></div>' + tabbar("pickup");
 };
+
+function pickupErr(msg) {
+  const box = $("#pickResult");
+  if (box) box.innerHTML = '<div class="card mt12" style="border-color:var(--danger,#d94841)"><div class="bold14" style="color:#c62f28">✕ ' + esc(msg) + '</div><div class="faint tiny mt5">请在“我的订单”查看正确取件码，或换用扫码/人脸方式</div></div>';
+}
 
 document.addEventListener("click", (e) => {
   const done = (r, oid) => {
@@ -452,24 +468,27 @@ document.addEventListener("click", (e) => {
       '<button class="btn btn-primary mt12" id="doneClose" style="width:100%">已取出物品，关门结算</button></div>';
     $("#doneClose").onclick = () => finishPickup(oid || r.orderId);
   };
+  if (e.target.closest("#changeOrder")) { state.pickOrderId = 0; go("u-orders"); return; }
+  const doPickup = (payload) => {
+    const oid = state.pickOrderId || 0;
+    const path = oid ? "/api/orders/" + oid + "/pickup" : "/api/orders/0/pickup";
+    const pb = $("#pickResult");
+    if (pb) pb.innerHTML = "";
+    return api(path, "POST", payload).then((r) => done(r, oid)).catch((err) => pickupErr(err.message));
+  };
   if (e.target.closest("#pickByCode")) {
     const code = $("#pickCode").value.trim();
-    api("/api/orders/0/pickup", "POST", { method: "code", code }).catch(async (err) => {
-      if (err.message.indexOf("订单不存在") === -1 && err.message.indexOf("404") === -1) throw err;
-    }).then((r) => { if (r) done(r); }).catch((err) => toast(err.message));
+    if (code.length !== 6) { pickupErr("请输入 6 位取件码"); return; }
+    doPickup({ method: "code", code });
   }
-  if (e.target.closest("#pickByScan")) {
-    api("/api/orders/0/pickup", "POST", { method: "scan" }).then((r) => done(r)).catch((err) => toast(err.message));
-  }
-  if (e.target.closest("#pickByFace")) {
-    api("/api/orders/0/pickup", "POST", { method: "face" }).then((r) => done(r)).catch((err) => toast(err.message));
-  }
+  if (e.target.closest("#pickByScan")) doPickup({ method: "scan" });
+  if (e.target.closest("#pickByFace")) doPickup({ method: "face" });
   if (e.target.closest("#pickByPwd")) {
     modal('<div class="bold14 mb10">取件密码</div><input class="input" id="mPwd" type="password" placeholder="6位以上取件密码"><button class="btn btn-primary mt12" id="mPwdGo" style="width:100%">开柜</button>');
     $("#mPwdGo").onclick = () => {
       const pwd = $("#mPwd").value;
       closeModal();
-      api("/api/orders/0/pickup", "POST", { method: "password", password: pwd }).then((r) => done(r)).catch((err) => toast(err.message));
+      doPickup({ method: "password", password: pwd });
     };
   }
 });
@@ -491,23 +510,26 @@ async function finishPickup(orderId) {
 }
 
 routes["u-mine"] = function () {
+  state._after = () => {
+    const btn = $("#setPwd");
+    if (btn) btn.onclick = () => {
+      modal('<div class="bold14 mb10">设置取件密码</div><input class="input" id="mNewPwd" type="password" placeholder="至少6位"><button class="btn btn-primary mt12" id="mSetPwd" style="width:100%">保存</button>');
+      $("#mSetPwd").onclick = () => {
+        const pwd = $("#mNewPwd").value.trim();
+        if (pwd.length < 6) { toast("取件密码至少6位"); return; }
+        api("/api/user/pickup-pwd", "POST", { password: pwd }).then(() => { closeModal(); toast("取件密码已保存"); }).catch((err) => toast(err.message));
+      };
+    };
+  };
   return appHeader("我的", "u-home") +
     '<div class="app-pad"><div class="hero-card"><div class="lbl">已登录用户</div><div class="big">优惠券 · 取件密码 · 在线客服</div></div>' +
     '<div class="card mt12"><div class="bold14">账户</div>' +
     '<button class="pay-row" data-action="nav" data-id="u-coupons" style="width:100%;text-align:left"><span class="muted">优惠券</span><b class="link">查看 ›</b></button>' +
     '<button class="pay-row" id="setPwd" style="width:100%;text-align:left"><span class="muted">取件密码</span><b class="link">设置 ›</b></button>' +
-    '<button class="pay-row" data-action="nav" data-id="u-chat" style="width:100%;text-align:left"><span class="muted">在线客服</span><b class="link">咨询 ›</b></button>' +
-    '<button class="pay-row" data-action="nav" data-id="m-login" style="width:100%;text-align:left;border:0"><span class="muted">员工后台入口</span><b class="link">前往 ›</b></button></div>' +
+    '<button class="pay-row" data-action="nav" data-id="u-chat" style="width:100%;text-align:left;border:0"><span class="muted">在线客服</span><b class="link">咨询 ›</b></button></div>' +
     '<button class="btn mt16" id="doLogout" style="width:100%">退出登录</button></div>' + tabbar("mine");
 };
 document.addEventListener("click", (e) => {
-  if (e.target.closest("#setPwd")) {
-    modal('<div class="bold14 mb10">设置取件密码</div><input class="input" id="mNewPwd" type="password" placeholder="至少6位"><button class="btn btn-primary mt12" id="mSetPwd" style="width:100%">保存</button>');
-    $("#mSetPwd").onclick = () => {
-      const pwd = $("#mNewPwd").value;
-      api("/api/user/pickup-pwd", "POST", { password: pwd }).then(() => { closeModal(); toast("保存成功"); }).catch((err) => toast(err.message));
-    };
-  }
   if (e.target.closest("#doLogout")) {
     api("/api/user/logout", "POST", {}).catch(() => {});
     saveToken("");
@@ -557,8 +579,26 @@ routes["u-chat"] = async function () {
     '<div id="chatList" class="chat-list mt12"></div>' +
     '<div class="row gap8 mt12"><input class="input flex1" id="chatInput" placeholder="输入问题…"><button class="btn btn-primary" id="chatSend">发送</button></div></div>';
 };
-function stopChatPoll() { if (state.chatTimer) { clearInterval(state.chatTimer); state.chatTimer = null; } }
-function startChatPoll() { if (!state.chatTimer) state.chatTimer = setInterval(pollChat, 3000); }
+let userChatWS = null;
+function stopChatPoll() {
+  if (state.chatTimer) { clearInterval(state.chatTimer); state.chatTimer = null; }
+  if (userChatWS) { try { userChatWS.onclose = null; userChatWS.close(); } catch (e) {} userChatWS = null; }
+}
+function startChatPoll() {
+  if (!state.chatTimer) state.chatTimer = setInterval(pollChat, 3000);
+  // WebSocket 实时通道：收到客服消息立即拉取（失败时 HTTP 轮询仍兜底）
+  // 无有效 token 时不发起连接，避免认证失败噪音
+  if (!userChatWS && state.token) {
+    try {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      userChatWS = new WebSocket(proto + "//" + location.host + "/api/ws/chat?token=" + encodeURIComponent(state.token || ""));
+      userChatWS.onmessage = (ev) => {
+        try { const m = JSON.parse(ev.data); if (m.type === "message") pollChat(); } catch (e) {}
+      };
+      userChatWS.onclose = () => { userChatWS = null; };
+    } catch (e) { userChatWS = null; }
+  }
+}
 async function pollChat() {
   const list = $("#chatList");
   if (!list) return;
@@ -586,14 +626,22 @@ function sendChat() {
 /* ================================================================
  *  柜机端（Kiosk 大屏）
  * ================================================================ */
+function kClock() {
+  return new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
 routes["k-standby"] = async function () {
   const cities = await api("/api/cities").catch(() => []);
   const sh = cities.find((c) => c.city === state.city) || cities[0] || { idle: 0 };
-  return '<div class="kiosk kiosk-idle"><div class="k-logo">优小宝寄存</div>' +
-    '<div class="k-big mono">' + sh.idle + ' 格空闲</div>' +
-    '<div class="k-sub">' + esc(state.city) + ' · 人民广场站 2 号口 · 请选择服务</div>' +
-    '<div class="k-actions"><button class="k-btn" data-action="kioskStore">存 件</button><button class="k-btn k-btn-alt" data-action="kioskPickup">取 件</button></div>' +
-    '<div class="k-foot faint tiny">演示站点 · 数据与后端实时联动</div></div>';
+  state._after = () => { if (state.kTimer) clearInterval(state.kTimer); state.kTimer = setInterval(() => { const el = $("#kClock"); if (el) el.textContent = kClock(); }, 30000); };
+  return '<div class="kiosk kiosk-idle">' +
+    '<div class="k-brand"><span class="k-brand-m">◧</span> 优小宝寄存<span class="k-clock" id="kClock">● ' + kClock() + '</span></div>' +
+    '<div class="k-center"><span class="k-eyebrow">SMART LOCKER · 智能寄存</span>' +
+    '<h1>安心寄存<br><em>轻松取件</em></h1><p>' + esc(state.city) + ' · 人民广场站 2 号口 · 当前 <b>' + sh.idle + '</b> 格空闲</p>' +
+    '<div class="k-actions"><button class="k-btn" data-action="kioskStore"><span class="ki">↓</span><span><b class="n">存 件</b><span class="d">扫码下单 · 即存即走</span></span><span class="ar">→</span></button>' +
+    '<button class="k-btn k-btn-alt" data-action="kioskPickup"><span class="ki">↑</span><span><b class="n">取 件</b><span class="d">输入取件码 · 开柜</span></span><span class="ar">→</span></button></div></div>' +
+    '<div class="k-art"><div class="hd">柜格实时状态 LIVE</div><div class="grid">' +
+    Array.from({ length: 12 }, (_, i) => '<div class="d' + (i > 8 ? " used" : "") + '"></div>').join("") + '</div></div>' +
+    '<div class="k-foot"><span>24 小时自助服务</span><span>收费透明 · 多退少补</span><span class="live">● 系统在线</span></div></div>';
 };
 
 routes["k-store"] = async function () {
@@ -612,30 +660,59 @@ routes["k-store"] = async function () {
       if (cells.length) cellsHtml = cells.join("");
     }
   }
-  return '<div class="kiosk"><div class="k-head"><button class="icon-btn" data-action="kioskHome">' + I.back + '</button><div class="ttl">扫码下单</div></div>' +
-    '<div class="k-pad"><div class="qr-box"><div class="tiny faint">请在手机 App 完成选柜支付</div>' +
-    '<div class="mono" style="font-size:12px;margin-top:10px">演示说明：柜机端引导用户到手机端下单；<br>下单成功后柜门自动弹开。</div></div>' +
-    '<div class="section-h mt20"><b>本站柜格实时状态</b></div><div id="k-cells" class="locker-grid-mini mt10">' + cellsHtml + '</div>' +
-    '<div class="section-h mt20"><b>附近网点</b></div>' + outlets.slice(0, 3).map((o) => '<div class="card mt8">' + esc(o.name) + " · 空闲 " + o.idle + " 格</div>").join("") +
-    '<button class="btn btn-primary mt20" data-action="kioskTip">扫码后在手机端完成下单（演示）</button></div></div>';
+  const sizes = [["S", "小格", "5 元/时", "适合背包、手提袋"], ["M", "中格", "7 元/时", "适合行李箱、电脑包"], ["L", "大格", "10 元/时", "适合大件行李"]];
+  return '<div class="kiosk"><div class="k-head"><button class="icon-btn" data-action="kioskHome">' + I.back + '</button><div class="ttl">存件 · 选择柜型</div><span class="ml-auto tiny faint">10.1 寸触屏</span></div>' +
+    '<div class="k-pad"><div class="h2">请选择柜格规格</div><div class="faint tiny mt5">计时从关门后开始 · 免费 10 分钟 · 24h 封顶</div>' +
+    '<div class="k-spec-row mt16">' + sizes.map(([k, n, p, d]) =>
+      '<button class="k-spec" data-size="' + k + '"><span class="tick">✓</span><div class="pic">' + (k === "S" ? "▣" : k === "M" ? "▤" : "▥") + '</div><b>' + n + '</b><div class="sub">' + d + '</div><div class="p">' + p + '</div></button>').join("") + '</div>' +
+    '<div class="k-pay-qr mt16"><div><b class="h2">扫码支付下单</b><div class="faint tiny mt5">用手机扫描二维码，在用户端完成选柜与支付；支付成功后柜门自动弹开。</div>' +
+    '<div class="row gap8 mt12"><button class="btn btn-primary" data-action="kioskTip">生成演示二维码</button><button class="btn" data-action="kioskHome">返回待机</button></div></div>' +
+    '<div class="qr-placeholder"><div class="mono">QR</div><span>扫码下单</span></div></div>' +
+    '<div class="section-h mt16"><b>本站柜格实时状态</b></div><div id="k-cells" class="locker-grid-mini mt10">' + cellsHtml + '</div></div></div>';
 };
 
 routes["k-pickup"] = function () {
-  return '<div class="kiosk"><div class="k-head"><button class="icon-btn" data-action="kioskHome">' + I.back + '</button><div class="ttl">取件</div></div>' +
-    '<div class="k-pad"><div class="qr-box"><div class="tiny faint">输入取件码 / 扫码 / 人脸识别</div></div>' +
-    '<input class="input mono mt16" id="kCode" maxlength="6" placeholder="6位取件码" inputmode="numeric" style="font-size:22px;text-align:center">' +
-    '<button class="k-btn mt16" id="kGo">开 柜 取 件</button>' +
-    '<div id="kMsg" class="mt16"></div></div></div>';
+  state.kCode = "";
+  const renderCode = () => {
+    const boxes = $("#kCodeBoxes");
+    if (boxes) boxes.innerHTML = Array.from({ length: 6 }, (_, i) => '<div class="cb">' + (state.kCode[i] || "") + '</div>').join("");
+  };
+  state._after = () => {
+    renderCode();
+    document.querySelectorAll(".k-key").forEach((b) => {
+      b.onclick = () => {
+        const k = b.dataset.k;
+        if (k === "del") state.kCode = state.kCode.slice(0, -1);
+        else if (k === "ok") { doKPickup(); return; }
+        else if (state.kCode.length < 6) state.kCode += k;
+        renderCode();
+      };
+    });
+  };
+  return '<div class="kiosk"><div class="k-head"><button class="icon-btn" data-action="kioskHome">' + I.back + '</button><div class="ttl">取件 · 输入取件码</div><span class="ml-auto tiny faint">10.1 寸触屏</span></div>' +
+    '<div class="k-pad k-pickup-pad"><div class="k-pickup-main"><div class="h2">请输入 6 位取件码</div><div class="faint tiny mt5">取件码在下单成功页与「我的订单」中查看</div>' +
+    '<div class="code-boxes" id="kCodeBoxes"></div><div id="kMsg" class="mt12"></div></div>' +
+    '<div class="keypad">' +
+    ["1", "2", "3", "4", "5", "6", "7", "8", "9", "del", "0", "ok"].map((k) =>
+      '<button class="k-key ' + (k === "del" ? "del" : k === "ok" ? "go" : "") + '" data-k="' + k + '">' + (k === "del" ? "删除" : k === "ok" ? "开柜" : k) + '</button>').join("") +
+    '</div></div></div>';
 };
-document.addEventListener("click", (e) => {
-  if (e.target.closest("#kGo")) {
-    const code = $("#kCode").value.trim();
-    api("/api/orders/0/pickup", "POST", { method: "code", code }).then((r) => {
-      $("#kMsg").innerHTML = '<div class="card"><div class="big-ok">柜门已弹开 · 柜格 ' + esc(r.lockerCode) + '</div><button class="btn btn-primary mt12" id="kDone" style="width:100%">已取出物品，关门结算</button></div>';
-      $("#kDone").onclick = () => finishPickup(r.orderId);
-    }).catch((err) => { $("#kMsg").innerHTML = '<div class="card">' + esc(err.message) + "</div>"; });
+
+async function doKPickup() {
+  const code = state.kCode || "";
+  const box = $("#kMsg");
+  if (code.length !== 6) { if (box) box.innerHTML = '<div class="k-err">请输入完整 6 位取件码</div>'; return; }
+  if (box) box.innerHTML = "";
+  try {
+    const r = await api("/api/orders/0/pickup", "POST", { method: "code", code });
+    if (box) box.innerHTML = '<div class="card"><div class="big-ok">柜门已弹开 · 柜格 ' + esc(r.lockerCode) + '</div><button class="btn btn-primary mt12" id="kDone" style="width:100%">已取出物品，关门结算</button></div>';
+    $("#kDone").onclick = () => finishPickup(r.orderId);
+  } catch (err) {
+    if (box) box.innerHTML = '<div class="k-err">✕ ' + esc(err.message) + '</div>';
+    state.kCode = "";
+    const cb = $("#kCodeBoxes"); if (cb) cb.innerHTML = Array.from({ length: 6 }, () => '<div class="cb"></div>').join("");
   }
-});
+}
 
 /* ================================================================
  *  管理后台
@@ -716,7 +793,7 @@ routes["m-dash"] = async function () {
     '<div class="row" style="justify-content:space-between"><div class="h2">数据看板</div><div>' +
     ["today|今日", "yesterday|昨日", "month|本月"].map((x) => { const [k, n] = x.split("|"); return '<button class="btn ' + (state.dashRange === k ? "btn-primary" : "") + ' dash-r" data-r="' + k + '">' + n + "</button>"; }).join(" ") + "</div></div>" +
     '<div class="stat-grid mt16">' +
-    statCard("营收（净）", "¥" + yuan2(d.revenue)) + statCard("订单数", d.orders) + statCard("柜格使用率", d.usageRate.toFixed(1) + "%") + statCard("未处理告警", d.openAlerts) +
+    statCard("净营收（收款-退款+补交）", "¥" + yuan2(d.revenue)) + statCard("订单数", d.orders) + statCard("柜格使用率", d.usageRate.toFixed(1) + "%") + statCard("未处理告警", d.openAlerts) +
     "</div>" +
     '<div class="card mt16"><div class="bold14 mb10">近 7 日订单趋势</div><div class="trend-row">' +
     d.trend.map((t) => '<div class="trend-col"><div class="mono bold14">' + t.orders + '</div><div class="trend-bar" style="height:' + (8 + Math.min(t.orders, 20) * 5) + 'px"></div><div class="tiny faint">' + esc(t.date) + "</div></div>").join("") +
@@ -832,17 +909,35 @@ routes["m-coupons"] = async function () {
   const defs = await admApi("/api/admin/coupons").catch(() => []);
   state._after = () => {
     $("#addCp").onclick = () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const nextYear = (Number(today.slice(0, 4)) + 1) + today.slice(4);
       modal('<div class="bold14 mb10">新建优惠券</div>' +
-        '<input class="input" id="cpName" placeholder="券名称"><div class="row gap8 mt8"><select class="input flex1" id="cpType"><option value="discount">折扣券</option><option value="hour">时长券(分钟)</option><option value="amount">金额券(分)</option></select><input class="input flex1" id="cpVal" placeholder="面值"></div>' +
-        '<div class="row gap8 mt8"><input class="input flex1" id="cpFrom" placeholder="开始 2026-01-01"><input class="input flex1" id="cpTo" placeholder="结束 2026-12-31"><input class="input flex1" id="cpTotal" placeholder="数量"></div>' +
+        '<input class="input" id="cpName" placeholder="券名称（必填）">' +
+        '<div class="row gap8 mt8"><select class="input flex1" id="cpType"><option value="discount">折扣券</option><option value="hour">时长券(分钟)</option><option value="amount">金额券(元)</option></select>' +
+        '<input class="input flex1" id="cpVal" value="80" placeholder="面值"></div>' +
+        '<div class="faint tiny mt5" id="cpHint">折扣券填 80 表示 8 折（1-99）；时长券填分钟数；金额券填元</div>' +
+        '<div class="row gap8 mt8"><input class="input flex1" id="cpFrom" type="date" value="' + today + '"><input class="input flex1" id="cpTo" type="date" value="' + nextYear + '"><input class="input flex1" id="cpTotal" type="number" min="1" value="100" placeholder="数量"></div>' +
         '<button class="btn btn-primary mt12" id="cpSave" style="width:100%">创建</button>');
+      $("#cpType").onchange = () => {
+        const t = $("#cpType").value;
+        $("#cpVal").value = t === "discount" ? "80" : t === "hour" ? "60" : "1";
+        $("#cpHint").textContent = t === "discount" ? "折扣券：填 80 表示 8 折（1-99）" : t === "hour" ? "时长券：填分钟数，如 60 表示 1 小时" : "金额券：填元，如 1 表示立减 1 元";
+      };
       $("#cpSave").onclick = async () => {
+        const name = $("#cpName").value.trim();
+        const type = $("#cpType").value;
+        const valRaw = Number($("#cpVal").value);
+        // 金额券界面按元输入，后端按分存储
+        const value = type === "amount" ? Math.round(valRaw * 100) : valRaw;
+        if (!name) { toast("请填写券名称"); return; }
+        if (!valRaw || valRaw <= 0) { toast("请填写有效面值"); return; }
+        if (type === "discount" && (valRaw < 1 || valRaw >= 100)) { toast("折扣券填 1-99，如 80 表示8折"); return; }
         try {
           await admApi("/api/admin/coupons", "POST", {
-            name: $("#cpName").value, type: $("#cpType").value, value: Number($("#cpVal").value), scope: "all",
-            validFrom: $("#cpFrom").value, validTo: $("#cpTo").value, totalCount: Number($("#cpTotal").value),
+            name, type, value, scope: "all",
+            validFrom: $("#cpFrom").value, validTo: $("#cpTo").value, totalCount: Number($("#cpTotal").value) || 100,
           });
-          closeModal(); toast("创建成功"); render();
+          closeModal(); toast("优惠券创建成功"); render();
         } catch (err) { toast(err.message); }
       };
     };
@@ -981,28 +1076,117 @@ routes["m-staff"] = async function () {
     '<div class="card mt16 faint tiny">修改角色/重置密码/禁用后，该员工登录态立即失效，需重新登录</div>');
 };
 
+/* ============ 客服工作台：微信式双栏（会话列表 + 聊天窗） ============ */
+let csWS = null;          // WebSocket 实时通道
+let csPollTimer = null;   // HTTP 轮询兜底
+let csCurrentUid = 0;     // 当前打开的用户
+let csAfter = 0;          // 当前会话已读取到的消息 id
+
+function csStopRealtime() {
+  if (csPollTimer) { clearInterval(csPollTimer); csPollTimer = null; }
+  if (csWS) { try { csWS.onclose = null; csWS.close(); } catch (e) {} csWS = null; }
+}
+function csStartRealtime() {
+  csStopRealtime();
+  const token = svcTkToken();
+  if (!token) return; // 未登录不发起 WS，HTTP 轮询兜底也不 needed（会被 adminGuard 拦截）
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  try {
+    csWS = new WebSocket(proto + "//" + location.host + "/api/admin/ws/chat?token=" + encodeURIComponent(token));
+    csWS.onmessage = (ev) => {
+      try {
+        const m = JSON.parse(ev.data);
+        if (m.type === "message") {
+          if (m.userId === csCurrentUid || !csCurrentUid) csPollMessages(true);
+          refreshCsList();
+        } else if (m.type === "sessions_changed") refreshCsList();
+      } catch (e) {}
+    };
+    csWS.onclose = () => { csWS = null; };
+  } catch (e) { csWS = null; }
+  // HTTP 轮询兜底：WebSocket 不可用/断线时仍能收到消息
+  csPollTimer = setInterval(() => { csPollMessages(false); refreshCsList(); }, 3000);
+}
+
+async function refreshCsList() {
+  const box = $("#csContactList");
+  if (!box) return;
+  const data = await admApi("/api/admin/cs/sessions").catch(() => null);
+  if (!data) return;
+  const sessions = data.sessions || [];
+  box.innerHTML = sessions.length ? sessions.map((s) =>
+    '<div class="wx-contact ' + (s.userId === csCurrentUid ? "on" : "") + '" data-uid="' + s.userId + '">' +
+    '<div class="wx-avatar">' + esc((s.userName || "用").slice(0, 1)) + '</div>' +
+    '<div class="wx-contact-main"><div class="row"><b>' + esc(s.userName || ("用户" + s.userId)) + '</b><span class="tiny faint ml-auto">' + esc(s.updatedAt || "") + '</span></div>' +
+    '<div class="tiny faint">' + (s.state === "agent" ? "● 接待中" : s.state === "waiting" ? "● 排队中" : "智能客服会话") + '</div></div></div>').join("")
+    : '<div class="faint tiny" style="padding:16px">暂无用户会话</div>';
+  box.querySelectorAll(".wx-contact").forEach((el) => {
+    el.onclick = () => openCsChat(Number(el.dataset.uid), el.querySelector("b").textContent);
+  });
+}
+
+async function csPollMessages(force) {
+  if (!csCurrentUid) return;
+  const data = await admApi("/api/admin/cs/messages?userId=" + csCurrentUid + "&afterId=" + csAfter).catch(() => null);
+  if (!data || !data.messages) return;
+  if (data.messages.length) {
+    const list = $("#wxMsgs");
+    if (list) {
+      list.innerHTML += data.messages.map(chatBubble).join("");
+      list.scrollTop = list.scrollHeight;
+    }
+    csAfter = data.messages[data.messages.length - 1].id;
+  } else if (force) {
+    // 全量刷新场景（首次打开时 csAfter=0 会走这里）
+  }
+}
+
+function openCsChat(uid, name) {
+  csCurrentUid = uid;
+  csAfter = 0;
+  const panel = $("#wxChat");
+  if (!panel) return;
+  panel.innerHTML =
+    '<div class="wx-chat-head"><b>' + esc(name) + '</b><span class="tiny faint ml-auto">用户ID ' + uid + '</span></div>' +
+    '<div id="wxMsgs" class="wx-msgs"></div>' +
+    '<div class="wx-input-row"><input class="input flex1" id="wxInput" placeholder="发消息…（Enter 发送）"><button class="btn btn-primary" id="wxSend">发送</button></div>';
+  const send = async () => {
+    const input = $("#wxInput");
+    const content = input.value.trim();
+    if (!content) return;
+    input.value = "";
+    await admApi("/api/admin/cs/reply", "POST", { userId: uid, content }).catch((err) => toast(err.message));
+    csPollMessages(true);
+  };
+  $("#wxSend").onclick = send;
+  $("#wxInput").onkeydown = (e) => { if (e.key === "Enter") send(); };
+  csPollMessages(true);
+  refreshCsList();
+}
+
 routes["m-cs"] = async function () {
   const g = adminGuard("m-cs");
   if (g !== null) return g;
   const duty = await admApi("/api/admin/cs/duty").catch(() => ({ duty: false }));
-  const sessions = await admApi("/api/admin/cs/sessions").catch(() => ({ sessions: [], pendingTickets: 0 }));
   state._after = () => {
     $("#dutyBtn").onclick = () => {
       admApi("/api/admin/cs/duty", "POST", { on: !duty.duty }).then(() => { toast(duty.duty ? "已切换为下班" : "已切换为在岗"); render(); }).catch((err) => toast(err.message));
     };
-    document.querySelectorAll(".cs-row").forEach((r) => {
-      r.onclick = () => openCsPanel(Number(r.dataset.uid), svcSessionName(sessions.sessions.find((s) => s.userId === Number(r.dataset.uid)) || { userId: r.dataset.uid }));
-    });
+    refreshCsList();
+    csStartRealtime();
     loadTickets(svcTkToken());
   };
+  // 离开页面时关闭实时通道
+  state._beforeRender = () => csStopRealtime();
   return adminShell("m-cs",
-    '<div class="row" style="justify-content:space-between"><div class="h2">客服工作台</div><button class="btn ' + (duty.duty ? "btn-primary" : "") + '" id="dutyBtn">' + (duty.duty ? "模拟下班" : "模拟上班") + "</button></div>" +
-    '<div class="card mt16"><div class="bold14 mb10">在线会话（' + (sessions.sessions || []).length + '）· 待处理工单 ' + sessions.pendingTickets + '</div>' +
-    (sessions.sessions || []).map((s) =>
-      '<div class="row cs-row" data-uid="' + s.userId + '" style="justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--bg-2)"><div><b>' + esc(s.userName || ("用户" + s.userId)) + '</b><span class="chip ml8 ' + (s.state === "agent" ? "chip-ok" : s.state === "waiting" ? "chip-warn" : "") + '">' +
-      (s.state === "agent" ? "接待中" : s.state === "waiting" ? "排队中" : "智能客服") + '</span></div><span class="tiny faint">' + esc(s.updatedAt) + "</span></div>").join("") + "</div>" +
-    '<div class="card mt12" id="csPanel"><div class="faint tiny">点击左侧会话开始接待</div></div>' +
-    '<div class="section-h mt16"><b>工单列表</b></div><div id="ticketList" class="mt10"></div>');
+    '<div class="row" style="justify-content:space-between"><div class="h2">客服工作台</div>' +
+    '<span class="tiny faint">实时通道：WebSocket + HTTP轮询兜底</span>' +
+    '<button class="btn ' + (duty.duty ? "btn-primary" : "") + '" id="dutyBtn">' + (duty.duty ? "模拟下班" : "模拟上班") + '</button></div>' +
+    '<div class="wx-shell mt16">' +
+    '<div class="wx-sidebar"><div class="wx-sidebar-head">消息</div><div id="csContactList" class="wx-contact-list"></div>' +
+    '<div class="wx-sidebar-head mt8">工单</div><div id="ticketList" class="wx-ticket-list"></div></div>' +
+    '<div class="wx-chat" id="wxChat"><div class="faint" style="margin:auto;text-align:center">← 点击左侧用户开始接待<br><span class="tiny">实时消息自动刷新，无需手动刷新页面</span></div></div>' +
+    '</div>');
 };
 
 function svcSessionName(row) { return (row.userName || "用户" + row.userId); }
