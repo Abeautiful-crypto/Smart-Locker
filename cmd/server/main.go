@@ -43,9 +43,12 @@ func endHandler(srv *httpapi.Server, end, indexHTML string) http.Handler {
 	srv.Routes(mux)
 	fs := http.FileServer(http.Dir("web"))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		// 静态资源禁用缓存：避免浏览器拿 304 旧 JS/CSS 导致"改了没生效"
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-store")
 			_, _ = w.Write([]byte(strings.ReplaceAll(indexHTML, "__LOCKER_END__", end)))
 			return
 		}
@@ -83,7 +86,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("[locker] 读取 web/index.html 失败: %v", err)
 	}
-	indexHTML := string(indexBytes)
+	// 资源 URL 加版本戳：即使中间代理缓存了旧文件，版本号变化也会强制重新拉取
+	indexHTML := strings.NewReplacer(
+		"proto.css", "proto.css?v=20261120b",
+		"app.css", "app.css?v=20261120b",
+		"app.js", "app.js?v=20261120b",
+	).Replace(string(indexBytes))
 
 	srv := httpapi.New(st)
 	ends := []endServer{
