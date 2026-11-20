@@ -44,8 +44,29 @@ const state = {
   adminInfo: null,
   chatAfter: 0,
   chatTimer: null,
+  avatar: localStorage.getItem("locker_avatar") || "🙂",
 };
+const AVATARS = ["🙂", "😎", "🐶", "🐱", "🦊", "🐼", "🚀", "🌟"];
 
+// 剪贴板：优先 Clipboard API，失败回退 execCommand（IDE 内嵌浏览器/非安全上下文可用）
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;left:-9999px;top:0";
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) { return false; }
+}
 function saveToken(tk) { localStorage.setItem("locker_token", tk || ""); }
 function hasToken() { return !!localStorage.getItem("locker_token"); }
 
@@ -239,6 +260,7 @@ document.addEventListener("click", (e) => {
     const agree = $("#agreeChk").checked;
     api("/api/user/login", "POST", { phone, code, agree }).then((r) => {
       saveToken(r.token);
+      if (r.avatar) { state.avatar = r.avatar; localStorage.setItem("locker_avatar", r.avatar); }
       toast("登录成功");
       go("u-home");
     }).catch((err) => toast(err.message));
@@ -305,7 +327,9 @@ routes["u-spec"] = async function () {
   if (!o) { toast("当前城市暂无可用网点"); return ""; }
   state.outlet = o;
   const detail = await api("/api/outlets/" + o.id);
-  state.outlet = detail;
+  // 价格来自收费规则接口（detail 不含价格字段，误用会导致显示 ¥0.00）
+  const rule = await api("/api/outlets/" + o.id + "/rule").catch(() => null);
+  state.outlet = Object.assign({}, detail, rule || {});
   const s = detail.idleBySize || {};
   state._after = () => {
     document.querySelectorAll(".spec-card").forEach((el) => { el.onclick = () => { state.spec = el.dataset.size; render(); }; });
@@ -321,7 +345,7 @@ routes["u-spec"] = async function () {
     ["S", "M", "L"].map((k) =>
       '<button class="card spec-card ' + (state.spec === k ? "on" : "") + '" data-size="' + k + '" style="width:100%;text-align:left;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">' +
       '<div><b>' + sizeName[k] + '</b><div class="faint tiny mt5">空闲 ' + (s[k] || 0) + " 格</div></div>" +
-      '<div class="mono" style="font-weight:700">¥' + yuan2(detail["price" + k]) + "/时</div></button>").join("") +
+      '<div class="mono" style="font-weight:700">¥' + yuan2(state.outlet["price" + k] || o["price" + k]) + "/时</div></button>").join("") +
     '<div class="card mt12"><div class="bold14 mb10">计费方式</div>' +
     '<label class="row gap8" style="margin-bottom:8px;cursor:pointer"><input type="radio" name="pm" value="prepaid" ' + (state.payMode === "prepaid" ? "checked" : "") + '><span>预付模式（1小时费用+押金，结束订单多退少补）</span></label>' +
     '<label class="row gap8" style="cursor:pointer"><input type="radio" name="pm" value="deposit" ' + (state.payMode === "deposit" ? "checked" : "") + '><span>押金模式（先付押金，按实际时长扣费）</span></label></div>' +
@@ -417,8 +441,7 @@ document.addEventListener("click", (e) => {
   const cp = e.target.closest(".copy-code");
   if (cp) {
     const txt = cp.dataset.code || "";
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(() => toast("取件码已复制")).catch(() => toast("取件码：" + txt));
-    else toast("取件码：" + txt);
+    copyText(txt).then((ok) => toast(ok ? "取件码 " + txt + " 已复制" : "取件码：" + txt));
     return;
   }
   const pk = e.target.closest(".op-pickup");
@@ -511,6 +534,22 @@ async function finishPickup(orderId) {
 
 routes["u-mine"] = function () {
   state._after = () => {
+    const av = $("#changeAvatar");
+    if (av) av.onclick = () => {
+      modal('<div class="bold14 mb10">选择头像</div><div class="avatar-picker">' +
+        AVATARS.map((a) => '<button class="avatar-opt ' + (a === state.avatar ? "on" : "") + '" data-a="' + a + '">' + a + '</button>').join("") + '</div>');
+      document.querySelectorAll(".avatar-opt").forEach((b) => {
+        b.onclick = async () => {
+          const a = b.dataset.a;
+          state.avatar = a;
+          localStorage.setItem("locker_avatar", a);
+          $("#myAvatar").textContent = a;
+          closeModal();
+          try { await api("/api/user/avatar", "POST", { avatar: a }); toast("头像已更新"); }
+          catch (err) { toast("头像已在本地保存"); }
+        };
+      });
+    };
     const btn = $("#setPwd");
     if (btn) btn.onclick = () => {
       modal('<div class="bold14 mb10">设置取件密码</div><input class="input" id="mNewPwd" type="password" placeholder="至少6位"><button class="btn btn-primary mt12" id="mSetPwd" style="width:100%">保存</button>');
@@ -522,7 +561,8 @@ routes["u-mine"] = function () {
     };
   };
   return appHeader("我的", "u-home") +
-    '<div class="app-pad"><div class="hero-card"><div class="lbl">已登录用户</div><div class="big">优惠券 · 取件密码 · 在线客服</div></div>' +
+    '<div class="app-pad"><div class="hero-card"><div class="row"><div class="user-avatar" id="myAvatar">' + esc(state.avatar) + '</div><div><div class="lbl">已登录用户</div><div class="big">优惠券 · 取件密码 · 在线客服</div></div></div>' +
+    '<button class="btn sm mt10" id="changeAvatar">切换头像 ›</button></div>' +
     '<div class="card mt12"><div class="bold14">账户</div>' +
     '<button class="pay-row" data-action="nav" data-id="u-coupons" style="width:100%;text-align:left"><span class="muted">优惠券</span><b class="link">查看 ›</b></button>' +
     '<button class="pay-row" id="setPwd" style="width:100%;text-align:left"><span class="muted">取件密码</span><b class="link">设置 ›</b></button>' +
@@ -558,9 +598,12 @@ routes["u-guide"] = function () {
 };
 
 /* ---------- 在线客服：HTTP 轮询兜底 ---------- */
-function chatBubble(m) {
-  const who = m.sender === "user" ? "me" : m.sender === "agent" ? "agent" : "sys";
-  return '<div class="chat-bubble ' + who + '"><div class="tiny faint">' + (who === "me" ? "我" : who === "agent" ? "人工客服" : "系统") + " · " + esc(m.time) + "</div><div class='mt5'>" + esc(m.content) + "</div></div>";
+function chatBubble(m, view) {
+  // view="user"（用户端）：自己=user 在右；view="agent"（客服端）：自己=agent 在右
+  const mine = view === "agent" ? m.sender === "agent" : m.sender === "user";
+  const who = m.sender === "system" || m.sender === "bot" ? "sys" : (mine ? "me" : "other");
+  const label = who === "me" ? "我" : m.sender === "agent" ? "人工客服" : m.sender === "user" ? "用户" : "系统";
+  return '<div class="chat-bubble ' + who + '"><div class="tiny faint">' + label + " · " + esc(m.time) + "</div><div class='mt5'>" + esc(m.content) + "</div></div>";
 }
 routes["u-chat"] = async function () {
   if (!requireLogin()) return "";
@@ -606,7 +649,7 @@ async function pollChat() {
   if (!data) return;
   if (data.messages && data.messages.length) {
     state.chatAfter = data.messages[data.messages.length - 1].id;
-    list.innerHTML += data.messages.map(chatBubble).join("");
+    list.innerHTML += data.messages.map((m) => chatBubble(m, "user")).join("");
     list.scrollTop = list.scrollHeight;
   }
   const stc = document.querySelector(".chat-status .chip:last-of-type");
@@ -1116,12 +1159,12 @@ async function refreshCsList() {
   const sessions = data.sessions || [];
   box.innerHTML = sessions.length ? sessions.map((s) =>
     '<div class="wx-contact ' + (s.userId === csCurrentUid ? "on" : "") + '" data-uid="' + s.userId + '">' +
-    '<div class="wx-avatar">' + esc((s.userName || "用").slice(0, 1)) + '</div>' +
+    '<div class="wx-avatar">' + esc(s.avatar || "🙂") + '</div>' +
     '<div class="wx-contact-main"><div class="row"><b>' + esc(s.userName || ("用户" + s.userId)) + '</b><span class="tiny faint ml-auto">' + esc(s.updatedAt || "") + '</span></div>' +
     '<div class="tiny faint">' + (s.state === "agent" ? "● 接待中" : s.state === "waiting" ? "● 排队中" : "智能客服会话") + '</div></div></div>').join("")
     : '<div class="faint tiny" style="padding:16px">暂无用户会话</div>';
   box.querySelectorAll(".wx-contact").forEach((el) => {
-    el.onclick = () => openCsChat(Number(el.dataset.uid), el.querySelector("b").textContent);
+    el.onclick = () => openCsChat(Number(el.dataset.uid), el.querySelector("b").textContent, el.querySelector(".wx-avatar").textContent);
   });
 }
 
@@ -1132,7 +1175,7 @@ async function csPollMessages(force) {
   if (data.messages.length) {
     const list = $("#wxMsgs");
     if (list) {
-      list.innerHTML += data.messages.map(chatBubble).join("");
+      list.innerHTML += data.messages.map((m) => chatBubble(m, "agent")).join("");
       list.scrollTop = list.scrollHeight;
     }
     csAfter = data.messages[data.messages.length - 1].id;
@@ -1141,13 +1184,13 @@ async function csPollMessages(force) {
   }
 }
 
-function openCsChat(uid, name) {
+function openCsChat(uid, name, avatar) {
   csCurrentUid = uid;
   csAfter = 0;
   const panel = $("#wxChat");
   if (!panel) return;
   panel.innerHTML =
-    '<div class="wx-chat-head"><b>' + esc(name) + '</b><span class="tiny faint ml-auto">用户ID ' + uid + '</span></div>' +
+    '<div class="wx-chat-head"><span class="wx-avatar">' + esc(avatar || "🙂") + '</span><b class="ml8">' + esc(name) + '</b><span class="tiny faint ml-auto">用户ID ' + uid + '</span></div>' +
     '<div id="wxMsgs" class="wx-msgs"></div>' +
     '<div class="wx-input-row"><input class="input flex1" id="wxInput" placeholder="发消息…（Enter 发送）"><button class="btn btn-primary" id="wxSend">发送</button></div>';
   const send = async () => {
@@ -1202,7 +1245,7 @@ function openCsPanel(uid, name) {
     const data = await admApi("/api/admin/cs/messages?userId=" + uid + "&afterId=" + after).catch(() => null);
     if (data && data.messages && data.messages.length) {
       after = data.messages[data.messages.length - 1].id;
-      $("#csMsgs").innerHTML += data.messages.map(chatBubble).join("");
+      $("#csMsgs").innerHTML += data.messages.map((m) => chatBubble(m, "agent")).join("");
       $("#csMsgs").scrollTop = $("#csMsgs").scrollHeight;
     }
   };

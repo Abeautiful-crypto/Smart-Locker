@@ -185,10 +185,12 @@
 .wx-chat-head { padding: 10px 16px; background: var(--surface); border-bottom: 2px solid var(--ink); display: flex; align-items: center; }
 .wx-msgs { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-height: 300px; max-height: 460px; }
 .wx-input-row { display: flex; gap: 8px; padding: 10px; background: var(--surface); border-top: 2px solid var(--ink); }
+/* 微信风格：自己在右（黄），对方在左（白），系统居中（灰） */
 .chat-bubble { max-width: 72%; padding: 8px 12px; border-radius: 10px; border: 2px solid var(--ink); background: var(--surface); align-self: flex-start; }
 .chat-bubble.me { background: #FFE9A8; align-self: flex-end; }
-.chat-bubble.agent { background: #DFF3E4; align-self: flex-end; }
-.chat-bubble.sys { background: #EFEFE9; align-self: center; font-size: 12px; }
+.chat-bubble.other { background: #fff; align-self: flex-start; }
+.chat-bubble.sys { background: #EFEFE9; align-self: center; font-size: 12px; border-style: dashed; }
+.chat-list { display: flex; flex-direction: column; gap: 10px; }
 @media(max-width: 900px) { .wx-sidebar { width: 240px; } }
 
 /* ============ 柜机触屏端重做（原型风格） ============ */
@@ -237,3 +239,10 @@
 .keypad .k-key.del { font-size: 14px; }
 .k-err { background: #ffe0dd; color: #a61e18; border: 2px solid #ff8a80; border-radius: 8px; padding: 10px 12px; font-weight: 700; }
 @media(max-width: 1000px) { .k-art { display: none; } .k-center h1 { font-size: 34px; } }
+
+/* ============ 用户头像 ============ */
+.user-avatar { width: 52px; height: 52px; flex: none; border: 2.5px solid var(--ink); border-radius: 12px; background: #fff; display: grid; place-items: center; font-size: 30px; box-shadow: 2px 2px 0 var(--ink); }
+.avatar-picker { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
+.avatar-opt { font-size: 30px; padding: 10px 0; border: 2.5px solid var(--ink); border-radius: 10px; background: var(--surface); cursor: pointer; }
+.avatar-opt.on, .avatar-opt:hover { background: var(--pop, #FFC93C); box-shadow: 3px 3px 0 var(--ink); }
+.wx-avatar { font-size: 20px; }
