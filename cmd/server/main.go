@@ -88,9 +88,9 @@ func main() {
 	}
 	// 资源 URL 加版本戳：即使中间代理缓存了旧文件，版本号变化也会强制重新拉取
 	indexHTML := strings.NewReplacer(
-		"proto.css", "proto.css?v=20261123g",
-		"app.css", "app.css?v=20261123g",
-		"app.js", "app.js?v=20261123g",
+		"proto.css", "proto.css?v=20261123h",
+		"app.css", "app.css?v=20261123h",
+		"app.js", "app.js?v=20261123h",
 	).Replace(string(indexBytes))
 
 	srv := httpapi.New(st)
