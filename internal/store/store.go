@@ -26,6 +26,7 @@ type User struct {
 	PickupPwd string
 	LoginPwd  string // 登录密码哈希（空表示仅注册未设置）
 	Avatar    string // 头像（emoji 或短标识）
+	TokenVer  int    // JWT 令牌版本，退出/失效时+1
 	CreatedAt time.Time
 }
 
@@ -39,6 +40,7 @@ type Staff struct {
 	PasswordHash  string
 	Status        string // active / disabled
 	ScopeOutletID int64  // 0 表示不限
+	TokenVer      int    // JWT 令牌版本
 	CreatedAt     time.Time
 }
 
@@ -244,6 +246,7 @@ type Store interface {
 	GetSession(ctx context.Context, token string) (*SessionRow, error)
 	DeleteSession(ctx context.Context, token string) error
 	DeleteSessionsFor(ctx context.Context, kind string, refID int64) error
+	IncrTokenVer(ctx context.Context, kind string, refID int64) error // JWT 主动失效（用户退出/员工改角色禁用）
 
 	// 网点/柜组/柜格
 	CreateOutlet(ctx context.Context, o *Outlet) error

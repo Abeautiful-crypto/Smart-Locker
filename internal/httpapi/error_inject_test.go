@@ -194,6 +194,18 @@ func (f *failStore) ListStaff(c context.Context) ([]*store.Staff, error) {
 	}
 	return f.MemStore.ListStaff(c)
 }
+func (f *failStore) GetStaff(c context.Context, id int64) (*store.Staff, error) {
+	if f.shouldFail("GetStaff") {
+		return nil, errInjected
+	}
+	return f.MemStore.GetStaff(c, id)
+}
+func (f *failStore) IncrTokenVer(c context.Context, kind string, refID int64) error {
+	if f.shouldFail("IncrTokenVer") {
+		return errInjected
+	}
+	return f.MemStore.IncrTokenVer(c, kind, refID)
+}
 func (f *failStore) GetStaffByIdentity(c context.Context, id string) (*store.Staff, error) {
 	if f.shouldFail("GetStaffByIdentity") {
 		return nil, errInjected
@@ -404,7 +416,6 @@ func TestInjectedErrors(t *testing.T) {
 		{"GetRule", "GET", "/api/outlets/1/rule", nil, "", 500},
 		{"GetRule", "POST", "/api/quote", map[string]any{"outletId": 1, "size": "S"}, "", 500},
 		// 用户端（tk）
-		{"GetSession", "GET", "/api/user/me", nil, tk, 401},
 		{"GetUserByID", "GET", "/api/user/me", nil, tk, 401},
 		{"SetPickupPwd", "POST", "/api/user/pickup-pwd", map[string]any{"password": "123456"}, tk, 500},
 		{"GetRule", "POST", "/api/orders", map[string]any{"outletId": 1, "size": "S"}, tk, 500},
@@ -422,7 +433,7 @@ func TestInjectedErrors(t *testing.T) {
 		{"ListUserCoupons", "GET", "/api/user/coupons", nil, tk, 500},
 		{"ListKB", "POST", "/api/chat/send", map[string]any{"content": "hello"}, tk, 500},
 		{"ListMessages", "GET", "/api/chat/messages", nil, tk, 500},
-		{"GetSession", "GET", "/api/chat/state", nil, tk, 401},
+		{"GetUserByID", "GET", "/api/chat/state", nil, tk, 401},
 	}
 	for _, c := range cases {
 		fs.fail.Store(c.fail)
@@ -433,11 +444,11 @@ func TestInjectedErrors(t *testing.T) {
 	}
 	fs.fail.Store("")
 
-	// 会话失效路径：GetSession 失败 → 401
-	fs.fail.Store("GetSession")
+	// JWT 鉴权失效路径：GetStaff 失败 → 401
+	fs.fail.Store("GetStaff")
 	code, _ := call(t, ts, "GET", "/api/admin/dashboard", superTk, nil)
 	if code != 401 {
-		t.Fatalf("注入会话错误应401: %d", code)
+		t.Fatalf("注入鉴权错误应401: %d", code)
 	}
 	fs.fail.Store("")
 }

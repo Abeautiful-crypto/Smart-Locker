@@ -123,7 +123,7 @@ func (s *MySQLStore) CreateUser(ctx context.Context, phone string) (*User, error
 
 func scanUser(row *sql.Row) (*User, error) {
 	u := &User{}
-	err := row.Scan(&u.ID, &u.Phone, &u.PickupPwd, &u.LoginPwd, &u.Avatar, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Phone, &u.PickupPwd, &u.LoginPwd, &u.Avatar, &u.TokenVer, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -131,7 +131,7 @@ func scanUser(row *sql.Row) (*User, error) {
 }
 
 func (s *MySQLStore) GetUserByPhone(ctx context.Context, phone string) (*User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,login_pwd,avatar,created_at FROM users WHERE phone=?", phone))
+	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,login_pwd,avatar,token_ver,created_at FROM users WHERE phone=?", phone))
 }
 
 func (s *MySQLStore) SetPickupPwd(ctx context.Context, userID int64, hash string) error {
@@ -150,7 +150,7 @@ func (s *MySQLStore) SetLoginPwd(ctx context.Context, userID int64, hash string)
 }
 
 func (s *MySQLStore) GetUserByID(ctx context.Context, id int64) (*User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,login_pwd,avatar,created_at FROM users WHERE id=?", id))
+	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,phone,pickup_pwd,login_pwd,avatar,token_ver,created_at FROM users WHERE id=?", id))
 }
 
 // CreateLocker 新建柜格
@@ -185,13 +185,13 @@ func (s *MySQLStore) SeedKB(category, keywords, answer string) {
 
 // ---------- 员工 ----------
 
-const staffCols = "id,emp_no,account,name,phone,role,password_hash,status,IFNULL(scope_outlet_id,0),created_at"
+const staffCols = "id,emp_no,account,name,phone,role,password_hash,status,IFNULL(scope_outlet_id,0),token_ver,created_at"
 
 func scanStaff(rows *sql.Rows) ([]*Staff, error) {
 	out := []*Staff{}
 	for rows.Next() {
 		st := &Staff{}
-		if err := rows.Scan(&st.ID, &st.EmpNo, &st.Account, &st.Name, &st.Phone, &st.Role, &st.PasswordHash, &st.Status, &st.ScopeOutletID, &st.CreatedAt); err != nil {
+		if err := rows.Scan(&st.ID, &st.EmpNo, &st.Account, &st.Name, &st.Phone, &st.Role, &st.PasswordHash, &st.Status, &st.ScopeOutletID, &st.TokenVer, &st.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, st)
@@ -301,6 +301,15 @@ func (s *MySQLStore) DeleteSession(ctx context.Context, token string) error {
 
 func (s *MySQLStore) DeleteSessionsFor(ctx context.Context, kind string, refID int64) error {
 	_, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE kind=? AND ref_id=?", kind, refID)
+	return err
+}
+
+func (s *MySQLStore) IncrTokenVer(ctx context.Context, kind string, refID int64) error {
+	table := "users"
+	if kind == "staff" {
+		table = "staff"
+	}
+	_, err := s.db.ExecContext(ctx, "UPDATE "+table+" SET token_ver=token_ver+1 WHERE id=?", refID)
 	return err
 }
 

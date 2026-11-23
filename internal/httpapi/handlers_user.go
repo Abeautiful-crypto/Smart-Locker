@@ -105,7 +105,7 @@ func (s *Server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 	// 避免上次转的人工接待状态带到下次登录。
 	_ = s.st.SetChatState(r.Context(), u.ID, "bot")
 
-	tk, err := s.grantUser(r.Context(), u.ID)
+	tk, err := s.grantUser(u)
 	if err != nil {
 		writeErr(w, 500, "会话创建失败")
 		return
@@ -120,7 +120,7 @@ func (s *Server) handleUserLogout(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, err.Error())
 		return
 	}
-	_ = s.st.DeleteSession(r.Context(), claims.Token)
+	_ = s.st.IncrTokenVer(r.Context(), "user", claims.refID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

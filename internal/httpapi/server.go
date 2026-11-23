@@ -2,7 +2,6 @@
 package httpapi
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -127,41 +126,46 @@ var errUnauthorized = errors.New("未登录或登录已失效")
 // cryptoRand 随机源
 var cryptoRand = rand.Reader
 
-// authUser 用户端鉴权
+// authUser 用户端鉴权（JWT）
 func (s *Server) authUser(r *http.Request) (*UserClaims, error) {
 	tk := tokenFrom(r)
-	if tk == "" {
+	claims, err := parseJWT(tk)
+	if err != nil || claims.Kind != "user" {
 		return nil, errUnauthorized
 	}
-	sess, err := s.st.GetSession(r.Context(), tk)
-	if err != nil || sess.Kind != "user" {
-		return nil, errUnauthorized
-	}
-	u, err := s.st.GetUserByID(r.Context(), sess.RefID)
-	if err != nil {
+	u, err := s.st.GetUserByID(r.Context(), refIDOf(claims))
+	if err != nil || u.TokenVer != claims.Ver {
 		return nil, errUnauthorized
 	}
 	return &UserClaims{Token: tk, refID: u.ID, phone: u.Phone}, nil
 }
 
-// authStaff 员工端鉴权：校验会话、员工启用状态
+// authStaff 员工端鉴权（JWT）：校验签名/版本、员工启用状态
 func (s *Server) authStaff(r *http.Request) (*StaffClaims, error) {
 	tk := tokenFrom(r)
-	if tk == "" {
+	claims, err := parseJWT(tk)
+	if err != nil || claims.Kind != "staff" {
 		return nil, errUnauthorized
 	}
-	sess, err := s.st.GetSession(r.Context(), tk)
-	if err != nil || sess.Kind != "staff" {
-		return nil, errUnauthorized
-	}
-	st, err := s.st.GetStaff(r.Context(), sess.RefID)
-	if err != nil {
+	st, err := s.st.GetStaff(r.Context(), refIDOf(claims))
+	if err != nil || st.TokenVer != claims.Ver {
 		return nil, errUnauthorized
 	}
 	if st.Status != "active" {
 		return nil, errors.New("账号已被禁用")
 	}
 	return &StaffClaims{Staff: st, Token: tk}, nil
+}
+
+func refIDOf(c *lockerClaims) int64 {
+	var id int64
+	for _, ch := range c.Subject {
+		if ch < '0' || ch > '9' {
+			return 0
+		}
+		id = id*10 + int64(ch-'0')
+	}
+	return id
 }
 
 // requireRole 页面级权限拦截：role 在 allowed 中才放行
@@ -273,16 +277,14 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin/tickets/{id}/resolve", s.handleAdminResolveTicket)
 }
 
-// grantUser 创建用户会话
-func (s *Server) grantUser(ctx context.Context, userID int64) (string, error) {
-	tk := newToken()
-	return tk, s.st.PutSession(ctx, &store.SessionRow{Token: tk, Kind: "user", RefID: userID, ExpiresAt: time.Now().Add(24 * time.Hour)})
+// grantUser 签发用户 JWT（24h）
+func (s *Server) grantUser(u *store.User) (string, error) {
+	return signJWT("user", u.ID, u.TokenVer, 24*time.Hour)
 }
 
-// grantStaff 创建员工会话
-func (s *Server) grantStaff(ctx context.Context, staffID int64) (string, error) {
-	tk := newToken()
-	return tk, s.st.PutSession(ctx, &store.SessionRow{Token: tk, Kind: "staff", RefID: staffID, ExpiresAt: time.Now().Add(8 * time.Hour)})
+// grantStaff 签发员工 JWT（8h）
+func (s *Server) grantStaff(st *store.Staff) (string, error) {
+	return signJWT("staff", st.ID, st.TokenVer, 8*time.Hour)
 }
 
 // 角色可见菜单（权限矩阵）

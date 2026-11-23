@@ -43,7 +43,7 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "账号或密码错误")
 		return
 	}
-	tk, err := s.grantStaff(r.Context(), st.ID)
+	tk, err := s.grantStaff(st)
 	if err != nil {
 		writeErr(w, 500, "会话创建失败")
 		return
@@ -60,7 +60,7 @@ func (s *Server) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, err.Error())
 		return
 	}
-	_ = s.st.DeleteSession(r.Context(), claims.Token)
+	_ = s.st.IncrTokenVer(r.Context(), "staff", claims.Staff.ID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -1013,6 +1013,7 @@ func (s *Server) handleAdminStaffRole(w http.ResponseWriter, r *http.Request) {
 	}
 	// 角色变更 → 登录态立即失效
 	_ = s.st.DeleteSessionsFor(r.Context(), "staff", id)
+	_ = s.st.IncrTokenVer(r.Context(), "staff", id)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -1043,6 +1044,7 @@ func (s *Server) handleAdminStaffResetPwd(w http.ResponseWriter, r *http.Request
 		return
 	}
 	_ = s.st.DeleteSessionsFor(r.Context(), "staff", id)
+	_ = s.st.IncrTokenVer(r.Context(), "staff", id)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -1074,6 +1076,7 @@ func (s *Server) handleAdminStaffToggle(w http.ResponseWriter, r *http.Request) 
 	}
 	if req.Status == "disabled" {
 		_ = s.st.DeleteSessionsFor(r.Context(), "staff", id)
+		_ = s.st.IncrTokenVer(r.Context(), "staff", id)
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }

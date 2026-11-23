@@ -22,6 +22,13 @@ go run ./cmd/server
 端口可用环境变量覆盖：`LOCKER_USER_ADDR`、`LOCKER_KIOSK_ADDR`、`LOCKER_ADMIN_ADDR`、`LOCKER_ADDR`。
 DSN 用 `LOCKER_DSN` 覆盖；`LOCKER_DSN=mem` 可无数据库运行（数据不持久化）。
 
+## 认证机制：JWT
+
+三端统一使用 JWT（HS256），密钥由 `LOCKER_JWT_SECRET` 覆盖（演示环境有默认值）。
+- claims：`kind`（user/staff）、`ver`（令牌版本）、`sub`（用户/员工 ID）、`exp`（用户 24h / 员工 8h）
+- 前端 `localStorage` 存 token，请求头 `X-Token` 传递，WebSocket/CSV 导出支持 `?token=`
+- **立即失效**：退出登录/改角色/重置密码/禁用账号时，服务端递增 `token_ver`，旧 JWT 即刻失效（满足"改角色登录态立即失效"约束）
+
 ## 演示账号
 
 - 用户端：任意手机号 + 验证码 `1234`

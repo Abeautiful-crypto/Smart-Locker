@@ -235,6 +235,21 @@ func (m *MemStore) DeleteSessionsFor(_ context.Context, kind string, refID int64
 	return nil
 }
 
+func (m *MemStore) IncrTokenVer(_ context.Context, kind string, refID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if kind == "staff" {
+		if st, ok := m.staff[refID]; ok {
+			st.TokenVer++
+		}
+	} else {
+		if u, ok := m.users[refID]; ok {
+			u.TokenVer++
+		}
+	}
+	return nil
+}
+
 // ---------- 网点 ----------
 
 func (m *MemStore) CreateOutlet(_ context.Context, o *Outlet) error {
