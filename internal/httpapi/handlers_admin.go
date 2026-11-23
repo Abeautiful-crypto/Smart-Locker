@@ -48,9 +48,15 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "会话创建失败")
 		return
 	}
+	scopeName := ""
+	if st.ScopeOutletID > 0 {
+		if o, err := s.st.GetOutlet(r.Context(), st.ScopeOutletID); err == nil {
+			scopeName = o.Name + " · " + o.Address
+		}
+	}
 	writeJSON(w, 200, map[string]any{
 		"token": tk, "name": st.Name, "role": st.Role, "menus": menusOf(st.Role),
-		"scopeOutletId": st.ScopeOutletID, "account": st.Account,
+		"scopeOutletId": st.ScopeOutletID, "scopeOutletName": scopeName, "account": st.Account,
 	})
 }
 

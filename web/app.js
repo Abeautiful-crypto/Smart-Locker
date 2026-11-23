@@ -352,20 +352,34 @@ routes["u-home"] = async function () {
   state._after = () => {
     const box = $("#cabMini");
     if (!box) return;
-    const first = outlets[0];
-    if (!first) { box.innerHTML = '<div class="faint tiny">暂无网点</div>'; return; }
-    api("/api/outlets/" + first.id).then((d) => {
+    const sel = $("#cabOutletSel");
+    const renderCab = async (id) => {
+      const d = await api("/api/outlets/" + id).catch(() => null);
+      if (!d) { box.innerHTML = '<div class="faint tiny">柜格状态加载失败</div>'; return; }
       box.innerHTML = cabinetGrid(d.cabinets || [], false) + cabinetLegend(d.byStatus);
       const card = $("#cabStatusCard");
       if (card) card.onclick = (e) => {
-        if (e.target.closest(".link")) return;
-        modal('<div class="bold14 mb10">柜格使用情况 · ' + esc(first.name) + '</div>' +
+        if (e.target.closest("select") || e.target.closest(".cab-switch")) return;
+        modal('<div class="bold14 mb10">柜格使用情况 · ' + esc(d.name) + '</div>' +
+          '<div class="faint tiny mb8">' + esc(d.address || (cur.city + " · " + d.name)) + '</div>' +
           cabinetGrid(d.cabinets || [], true) + cabinetLegend(d.byStatus) +
           '<div class="faint tiny mt12" style="line-height:1.7">空闲柜格可直接寄存；异常柜格暂不开放。用户端取件请在柜机端凭取件码操作。</div>' +
           '<button class="btn btn-primary mt12" id="cabOk" style="width:100%">我知道了</button>');
         $("#cabOk").onclick = closeModal;
       };
-    }).catch(() => { box.innerHTML = '<div class="faint tiny">柜格状态加载失败</div>'; });
+    };
+    const first = outlets[0];
+    if (!first) { box.innerHTML = '<div class="faint tiny">暂无网点</div>'; return; }
+    if (sel) {
+      sel.onchange = () => {
+        state.cabOutlet = Number(sel.value);
+        const o = outlets.find((x) => x.id === state.cabOutlet);
+        const loc = $("#cabLoc");
+        if (loc && o) loc.textContent = o.name + " · " + (o.address || "");
+        renderCab(state.cabOutlet);
+      };
+    }
+    renderCab(Number((sel && sel.value) || state.cabOutlet || first.id));
   };
   return appHeader("优小宝寄存") +
     '<div class="app-pad">' +
@@ -374,7 +388,9 @@ routes["u-home"] = async function () {
     '<div class="hero-actions"><button class="hero-act" data-action="spec"><div class="ic">' + I.box + '</div><b>立即存件</b><span>选柜型 · 在线支付</span></button>' +
     '<button class="hero-act" data-action="nav" data-id="u-orders"><div class="ic">' + I.list + '</div><b>我的订单</b><span>查看取件码 / 补交</span></button></div>' +
     '<div class="faint tiny mt8" style="text-align:center">取件请到柜机触屏端，输入订单中的 6 位取件码</div>' +
-    '<div class="card mt12" id="cabStatusCard"><div class="row" style="justify-content:space-between"><b>柜机状态</b><span class="link" data-action="nav" data-id="u-outlets">查看详情 ›</span></div>' +
+    '<div class="card mt12" id="cabStatusCard"><div class="row" style="justify-content:space-between"><div><b>柜机状态</b><div class="faint tiny" id="cabLoc">' + esc(outlets[0] ? outlets[0].name + ' · ' + (outlets[0].address || '') : '') + '</div></div>' +
+    '<span class="link cab-switch">查看详情 ›</span></div>' +
+    '<div class="row gap8 mt8"><select class="input cab-switch" id="cabOutletSel" style="width:auto;min-width:140px">' + outlets.map((o) => '<option value="' + o.id + '" ' + (state.cabOutlet === o.id ? 'selected' : '') + '>' + esc(o.name) + '</option>').join('') + '</select><span class="faint tiny">切换柜点查看状态</span></div>' +
     '<div id="cabMini" class="mt8"><div class="faint tiny">加载中…</div></div></div>' +
     '<div class="section"><div class="section-h"><b>附近网点</b><span class="link" data-action="nav" data-id="u-outlets">全部 ›</span></div>' +
     outlets.slice(0, 3).map((o) => outletRow(o)).join("") + "</div>" +
@@ -394,9 +410,23 @@ let leafletLoading = false;
 function mapFallback(outlets) {
   const el = $("#olMap");
   if (!el) return;
-  el.innerHTML = '<div class="map-fallback"><b>附近网点分布图</b><div class="map-fallback-pins">' +
-    outlets.slice(0, 6).map((o, i) => '<span class="pin" style="left:' + (18 + (i % 3) * 27) + '%;top:' + (22 + Math.floor(i / 3) * 42) + '%">' + (o.idle || 0) + '格</span>').join("") + '</div><div class="faint tiny">地图服务不可用，显示示意图</div></div>';
+  // 用真实经纬度按比例定位（相对最小/最大坐标），没有坐标时退化均匀排布
+  const withPos = outlets.filter((o) => o.lat && o.lng);
+  const lats = withPos.map((o) => o.lat), lngs = withPos.map((o) => o.lng);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats), minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+  const pins = outlets.slice(0, 8).map((o, i) => {
+    let x, y;
+    if (o.lat && o.lng && maxLng > minLng && maxLat > minLat) {
+      x = 12 + ((o.lng - minLng) / (maxLng - minLng)) * 72;
+      y = 68 - ((o.lat - minLat) / (maxLat - minLat)) * 52;
+    } else { x = 18 + (i % 3) * 27; y = 22 + Math.floor(i / 3) * 42; }
+    return '<button class="pin" style="left:' + x + '%;top:' + y + '%" title="' + esc(o.name) + '">' + esc(o.name.replace(/站|枢纽|寄存点/g, '')) + ' ' + (o.idle || 0) + '格</button>';
+  }).join("");
+  el.innerHTML = '<div class="map-fallback"><b>' + esc(state.city) + ' · 附近网点分布（示意图）</b><div class="map-fallback-pins">' + pins +
+    '</div><div class="faint tiny">点击网点卡片查看真实位置 · 当前离线示意图，坐标按实际经纬度排布</div></div>';
+  el.querySelectorAll(".pin").forEach((b, i) => { b.onclick = () => openOutletDetail(outlets[i].id); });
 }
+// 网点地图：优先用真实 Leaflet 底图；若瓦片加载失败（离线/网络受限）自动切换本地矢量示意图，保证始终可见
 function renderLeaflet(outlets) {
   const el = $("#olMap");
   if (!el || typeof L === "undefined") { mapFallback(outlets); return; }
@@ -404,9 +434,15 @@ function renderLeaflet(outlets) {
   if (!pts.length) { mapFallback(outlets); return; }
   if (outletMap) { outletMap.remove(); outletMap = null; }
   outletMap = L.map(el, { zoomControl: false }).setView([pts[0].lat, pts[0].lng], 13);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  const tiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors", maxZoom: 18,
   }).addTo(outletMap);
+  // 瓦片加载失败检测：3 秒内没有任何瓦片 load 就切换本地示意图
+  let tileOK = false;
+  tiles.on("tileload", () => { tileOK = true; });
+  setTimeout(() => {
+    if (!tileOK && outletMap && $("#olMap")) { outletMap.remove(); outletMap = null; mapFallback(outlets); }
+  }, 3000);
   pts.forEach((o) => {
     L.marker([o.lat, o.lng]).addTo(outletMap)
       .bindPopup('<b>' + esc(o.name) + '</b><br>空闲 ' + (o.idle || 0) + ' 格<br>' + esc(o.address || ""))
@@ -415,7 +451,7 @@ function renderLeaflet(outlets) {
 }
 function loadLeaflet(outlets) {
   if (typeof L !== "undefined") { renderLeaflet(outlets); return; }
-  mapFallback(outlets); // 立即显示示意图，CDN 加载成功后再替换
+  mapFallback(outlets); // 立即显示示意图，CDN 加载成功后再尝试真实底图
   if (leafletLoading) return;
   leafletLoading = true;
   const css = document.createElement("link");
@@ -875,18 +911,24 @@ function kClock() {
 routes["k-standby"] = async function () {
   const cities = await api("/api/cities").catch(() => []);
   const sh = cities.find((c) => c.city === state.city) || cities[0] || { idle: 0 };
-  const detail = await api("/api/outlets?city=" + encodeURIComponent(state.city)).then((l) => l[0]).catch(() => null);
+  const outlets = await api("/api/outlets?city=" + encodeURIComponent(state.city)).catch(() => []);
+  const detail = outlets[0] || null;
   const cabDetail = detail ? await api("/api/outlets/" + detail.id).catch(() => null) : null;
   const cabinets = (cabDetail && cabDetail.cabinets) || [];
-  state._after = () => { if (state.kTimer) clearInterval(state.kTimer); state.kTimer = setInterval(() => { const el = $("#kClock"); if (el) el.textContent = kClock(); }, 30000); };
+  const byStatus = (cabDetail && cabDetail.byStatus) || { idle: 0, occupied: 0, fault: 0 };
+  state._after = () => {
+    if (state.kTimer) clearInterval(state.kTimer);
+    state.kTimer = setInterval(() => { const el = $("#kClock"); if (el) el.textContent = kClock(); }, 30000);
+  };
   return '<div class="kiosk kiosk-idle">' +
     '<div class="k-brand"><span class="k-brand-m">◧</span> 优小宝寄存<span class="k-clock" id="kClock">● ' + kClock() + '</span></div>' +
     '<div class="k-center"><span class="k-eyebrow">SMART LOCKER · 智能寄存</span>' +
-    '<h1>安心寄存<br><em>轻松取件</em></h1><p>' + esc(state.city) + ' · 人民广场站 2 号口 · 当前 <b>' + sh.idle + '</b> 格空闲</p>' +
+    '<h1>安心寄存<br><em>轻松取件</em></h1><p>' + esc(state.city) + ' · ' + esc(detail ? detail.name + (detail.address ? '（' + detail.address + '）' : '') : '暂无网点') + ' · 当前 <b>' + sh.idle + '</b> 格空闲</p>' +
     '<div class="k-actions"><button class="k-btn" data-action="kioskStore"><span class="ki">↓</span><span><b class="n">存 件</b><span class="d">扫码下单 · 即存即走</span></span><span class="ar">→</span></button>' +
     '<button class="k-btn k-btn-alt" data-action="kioskPickup"><span class="ki">↑</span><span><b class="n">取 件</b><span class="d">输入取件码 · 开柜</span></span><span class="ar">→</span></button></div></div>' +
-    '<div class="k-art"><div class="hd">柜格实时状态 LIVE</div><div class="grid">' +
-    (cabinets.length ? cabinets.slice(0, 24).map((c) => '<div class="d ' + (c.status === "occupied" ? "used" : c.status === "fault" ? "err" : "") + '" title="' + esc(c.code) + ' ' + statusName[c.status] + '">' + esc(c.code.replace(/^[A-Za-z]-?/, "")) + '</div>').join("") : '<div class="faint tiny">暂无数据</div>') + '</div></div>' +
+    '<div class="k-art"><div class="hd">' + esc(detail ? detail.name : '柜机') + ' · 柜格实时状态 LIVE</div><div class="grid">' +
+    (cabinets.length ? cabinets.slice(0, 24).map((c) => '<div class="d ' + (c.status === "occupied" ? "used" : c.status === "fault" ? "err" : "") + '" title="' + esc(c.code) + ' ' + statusName[c.status] + '">' + esc(c.code.replace(/^[A-Za-z]-?/, "")) + '</div>').join("") : '<div class="faint tiny">暂无数据</div>') +
+    '</div><div class="k-legend"><span><i class="free"></i>空闲 ' + (byStatus.idle || 0) + '</span><span><i class="used"></i>占用 ' + (byStatus.occupied || 0) + '</span><span><i class="err"></i>异常 ' + (byStatus.fault || 0) + '</span></div></div>' +
     '<div class="k-foot"><span>24 小时自助服务</span><span>收费透明 · 多退少补</span><span class="live">● 系统在线</span></div></div>';
 };
 
@@ -1098,7 +1140,7 @@ routes["m-monitor"] = async function () {
   // 网点管理员无权访问"网点管理"模块，使用登录态里的 scopeOutletId，不调 /api/admin/outlets
   const scope = me.scopeOutletId || 0;
   const outs = me.role === "site_admin"
-    ? [{ id: scope, name: "本网点" }]
+    ? [{ id: scope, name: me.scopeOutletName || "本网点" }]
     : await admApi("/api/admin/outlets").catch(() => []);
   const oid = state.monOutlet || (scope && me.role === "site_admin" ? scope : (outs[0] && outs[0].id)) || 0;
   const lockers = oid ? await admApi("/api/admin/lockers?outletId=" + oid).catch(() => []) : [];
@@ -1235,13 +1277,30 @@ routes["m-orders"] = async function () {
   const orders = await admApi("/api/admin/orders" + (st ? "?status=" + st : "")).catch(() => []);
   state._after = () => {
     document.querySelectorAll(".ord-f").forEach((b) => { b.onclick = () => { state.admOrderStatus = b.dataset.k; render(); }; });
+    document.querySelectorAll(".ord-detail").forEach((b) => {
+      b.onclick = async () => {
+        const d = await admApi("/api/admin/orders/" + b.dataset.id).catch(() => null);
+        const o = d || orders.find((x) => x.id === Number(b.dataset.id)) || {};
+        const row = (k, v) => '<div class="pay-row"><span class="muted">' + k + '</span><b>' + esc(String(v == null || v === "" ? "-" : v)) + '</b></div>';
+        modal('<div class="bold14 mb10">订单详情 · ' + esc(o.orderNo || "") + '</div>' +
+          '<div class="card">' + row("订单号", o.orderNo) + row("网点ID", o.outletId) + row("柜格ID", o.lockerId) +
+          row("柜型", sizeName[o.size] || o.size) + row("计费模式", o.payMode === "deposit" ? "押金模式" : "预付模式") +
+          row("状态", o.status === "active" ? "进行中" : "已结束") + row("预付金额", "¥" + yuan2(o.prepaid)) + row("押金", "¥" + yuan2(o.deposit)) +
+          row("应收费用", "¥" + yuan2(o.fee)) + row("退款", "¥" + yuan2(o.refund)) + row("补交", "¥" + yuan2(o.extra)) +
+          row("券抵", "¥" + yuan2(o.couponDiscount)) + row("取件码", o.code) + row("取件方式", o.pickupMethod) +
+          row("开始时间", o.startedAt) + row("结束时间", o.endedAt) + row("结算说明", o.settleNote) +
+          '</div><button class="btn btn-primary mt12" id="odClose" style="width:100%">关闭</button>');
+        $("#odClose").onclick = closeModal;
+      };
+    });
   };
   return adminShell("m-orders",
     '<div class="h2">订单管理</div><div class="row gap8 mt12">' +
     ["|全部", "active|进行中", "finished|已结束"].map((x) => { const [k, n] = x.split("|"); return '<button class="btn ' + (st === k ? "btn-primary" : "") + ' ord-f" data-k="' + k + '">' + n + "</button>"; }).join(" ") + "</div>" +
-    '<table class="tbl mt16"><thead><tr><th>订单号</th><th>网点</th><th>柜型</th><th>模式</th><th>状态</th><th>费用</th><th>退款</th><th>补交</th><th>取件方式</th></tr></thead><tbody>' +
+    '<div class="faint tiny mt8">费用=按实际时长应收（免费时段内为 ¥0）；退款=预付全款退回。例：预付 ¥15、10 分钟内取件 → 费用 ¥0、退款 ¥15。</div>' +
+    '<table class="tbl mt16"><thead><tr><th>订单号</th><th>网点</th><th>柜型</th><th>模式</th><th>状态</th><th>预付</th><th>费用(应收)</th><th>退款</th><th>补交</th><th>取件方式</th><th>操作</th></tr></thead><tbody>' +
     orders.map((o) => "<tr><td class='mono tiny'>" + esc(o.orderNo) + "</td><td>" + o.outletId + "</td><td>" + (sizeName[o.size] || o.size || "") + "</td><td>" + (o.payMode === "deposit" ? "押金" : "预付") + "</td><td>" +
-      (o.status === "active" ? '<span class="chip chip-ok">进行中</span>' : '<span class="chip">已结束</span>') + "</td><td class='mono'>¥" + yuan2(o.fee) + "</td><td class='mono'>¥" + yuan2(o.refund) + "</td><td class='mono'>" + (o.extra ? "¥" + yuan2(o.extra) + (o.extraPaid ? "✓" : "未付") : "-") + "</td><td>" + (o.pickupMethod || "-") + "</td></tr>").join("") +
+      (o.status === "active" ? '<span class="chip chip-ok">进行中</span>' : '<span class="chip">已结束</span>') + "</td><td class='mono'>¥" + yuan2(o.payMode === "deposit" ? o.deposit : o.prepaid) + "</td><td class='mono'>¥" + yuan2(o.fee) + "</td><td class='mono'>¥" + yuan2(o.refund) + "</td><td class='mono'>" + (o.extra ? "¥" + yuan2(o.extra) + (o.extraPaid ? "✓" : "未付") : "-") + "</td><td>" + (o.pickupMethod || "-") + '</td><td><button class="btn sm ord-detail" data-id="' + o.id + '">详情</button></td></tr>').join("") +
     "</tbody></table>");
 };
 
