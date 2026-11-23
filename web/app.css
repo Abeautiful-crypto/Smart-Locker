@@ -282,7 +282,7 @@ img.user-avatar { width: 52px; height: 52px; object-fit: cover; border-radius: 1
 /* 柜格实时状态网格（三端共用） */
 .cab-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
 .cab-cell { aspect-ratio: 1; border: 2.5px solid var(--ink); border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: default; font-size: 11px; }
-.cab-cell b { font-size: 13px; }
+.cab-cell b { font-size: 11px; letter-spacing: -.3px; }
 .cab-cell span { font-size: 9px; opacity: .75; }
 .cab-cell.free { background: #C8EAD4; }
 .cab-cell.used { background: #DDD8C8; }

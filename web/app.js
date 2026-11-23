@@ -365,7 +365,7 @@ routes["u-home"] = async function () {
     const renderCab = async (id) => {
       const d = await api("/api/outlets/" + id).catch(() => null);
       if (!d) { box.innerHTML = '<div class="faint tiny">柜格状态加载失败</div>'; return; }
-      box.innerHTML = cabinetGrid(d.cabinets || [], false) + cabinetLegend(d.byStatus);
+      box.innerHTML = cabinetGrid(d.cabinets || [], true) + cabinetLegend(d.byStatus);
       // 点击单个柜格查看该格详情（不再整卡弹窗）
       box.querySelectorAll(".cab-cell[data-code]").forEach((cell) => {
         cell.style.cursor = "pointer";
@@ -482,28 +482,14 @@ routes["u-outlets"] = async function () {
   const outlets = await api("/api/outlets?city=" + encodeURIComponent(state.city)).catch(() => []);
   state._after = () => {
     initOutletMap(outlets);
-    // 地区搜索：输入城市/区/网点名/地址，实时过滤列表并同步地图标记
-    const inp = $("#olSearch");
-    if (inp) inp.oninput = (e) => {
-      const kw = e.target.value.trim();
-      if (!kw) {
-        $("#olList").innerHTML = outlets.map(outletRow).join("");
-        initOutletMap(outlets);
-        return;
-      }
-      api("/api/outlets/search?q=" + encodeURIComponent(kw)).then((list) => {
-        const el = $("#olList");
-        if (el) el.innerHTML = list.length ? list.map(outletRow).join("") : '<div class="faint tiny">未找到匹配网点，试试城市名如"上海"</div>';
-        initOutletMap(list);
-      }).catch(() => {});
-    };
+    // 地区切换：城市快选（搜索框已按用户要求移除）
     document.querySelectorAll(".ol-city").forEach((b) => {
       b.onclick = () => { state.city = b.dataset.c; render(); };
     });
   };
   return appHeader("附近寄存 · " + esc(state.city), "u-home") +
-    '<div class="app-pad"><input class="input" id="olSearch" placeholder="搜索地区 / 网点 / 地址（如：上海、人民广场）">' +
-    '<div class="row gap8 mt8" style="flex-wrap:wrap">' + cities.map((c) => '<button class="btn sm ol-city ' + (c.city === state.city ? "btn-primary" : "") + '" data-c="' + esc(c.city) + '">' + esc(c.city) + '</button>').join("") + '</div>' +
+    '<div class="app-pad"><div class="faint tiny mb8">选择城市查看附近寄存点：</div>' +
+    '<div class="row gap8" style="flex-wrap:wrap">' + cities.map((c) => '<button class="btn sm ol-city ' + (c.city === state.city ? "btn-primary" : "") + '" data-c="' + esc(c.city) + '">' + esc(c.city) + '</button>').join("") + '</div>' +
     '<div id="olMap" class="ol-map mt12"></div>' +
     '<div id="olList" class="mt12">' + outlets.map(outletRow).join("") + "</div></div>" + tabbar("");
 };
