@@ -101,6 +101,10 @@ func (s *Server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "登录方式不支持")
 		return
 	}
+	// 每次登录视为新一轮会话：客服接待状态重置为智能客服，
+	// 避免上次转的人工接待状态带到下次登录。
+	_ = s.st.SetChatState(r.Context(), u.ID, "bot")
+
 	tk, err := s.grantUser(r.Context(), u.ID)
 	if err != nil {
 		writeErr(w, 500, "会话创建失败")

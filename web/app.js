@@ -719,6 +719,11 @@ async function pollChat() {
   }
   const stc = document.querySelector(".chat-status .chip:last-of-type");
   if (stc) stc.textContent = "当前：" + (data.state === "agent" ? "人工接待中" : data.state === "waiting" ? "排队等待人工" : "智能客服");
+  const th = $("#toHuman");
+  if (th) {
+    th.disabled = data.state === "agent" || data.state === "waiting";
+    th.textContent = data.state === "agent" ? "人工接待中" : data.state === "waiting" ? "排队等待中" : "转人工";
+  }
 }
 function sendChat() {
   const input = $("#chatInput");
