@@ -278,7 +278,6 @@ routes["u-login"] = function () {
     '<div class="card mt12"><label class="lbl">手机号</label><input class="input" id="phone" maxlength="11" placeholder="请输入11位手机号" inputmode="numeric">' +
     (mode === "password"
       ? '<label class="lbl mt12">登录密码</label><input class="input" id="pwd" type="password" placeholder="请输入登录密码">' +
-        '<div class="faint tiny mt5">演示环境所有用户初始密码：123456</div>' +
         '<div class="tiny mt5"><span class="link" id="forgotPwd">忘记密码？用验证码登录 ›</span></div>'
       : '<div class="row gap8 mt12"><input class="input flex1" id="code" maxlength="6" placeholder="验证码" inputmode="numeric"><button class="btn" id="sendCode">发送验证码</button></div>' +
         '<div class="faint tiny mt5">演示环境验证码固定为 1234；首次登录请用验证码，登录后可在「我的」设置密码</div>') +
@@ -428,6 +427,7 @@ routes["u-pay"] = async function () {
       try {
         const r = await api("/api/orders", "POST", { outletId: state.outlet.id, size: state.spec, payMode: state.payMode, couponInstanceId: state.couponId });
         state.lastOrder = r;
+        state.openStep = 0;
         go("u-open");
       } catch (err) { toast(err.message); }
     };
@@ -464,17 +464,64 @@ routes["u-coupon-select"] = async function () {
       : '<div class="card mt12 faint">暂无可用优惠券</div>') + "</div>";
 };
 
+/* 存件流程状态机：支付成功 → 开柜动画 → 放入物品 → 关柜动画 → 完成 */
+function openStepView(step, o) {
+  const steps = ["支付成功", "开柜门", "放入物品", "关柜门", "存件完成"];
+  const bar = '<div class="step-bar">' + steps.map((s, i) =>
+    '<div class="step ' + (i < step ? "done" : i === step ? "on" : "") + '">' + (i < step ? "✓" : i + 1) + "</div>").join("") + '</div><div class="step-lbl">' + steps[step] + '</div>';
+  const door = (st) => '<div class="locker-scene"><div class="locker-body"><div class="locker-door ' + st + '">' +
+    '<div class="locker-handle"></div></div><div class="locker-slot"></div></div></div>';
+  const info = '<div class="card mt12"><div class="pay-row"><span class="muted">柜格</span><b class="mono">' + esc(o.lockerCode) + '</b></div>' +
+    '<div class="pay-row"><span class="muted">取件码</span><b class="mono" style="font-size:18px;letter-spacing:3px">' + esc(o.code) + '</b></div>' +
+    '<div class="pay-row" style="border:0"><span class="muted">支付金额</span><b class="price">¥' + yuan2(o.paid) + '</b></div></div>';
+  switch (step) {
+    case 0:
+      return '<div class="app-pad" style="text-align:center"><div class="big-ok">✓ 支付成功</div><div class="faint tiny mt5">已为您分配柜格，准备开柜</div>' + bar + info +
+        '<button class="btn btn-primary mt16" id="openGo" style="width:100%">开 柜</button></div>';
+    case 1:
+      return '<div class="app-pad" style="text-align:center"><div class="h2">正在打开柜门…</div>' + bar + door("opening") + info +
+        '<div class="faint tiny mt12">如柜门未弹开，可上报异常，系统自动切换备用柜格</div>' +
+        '<button class="btn mt12" id="openFail" style="width:100%">柜门未开启？上报并换柜</button></div>';
+    case 2:
+      return '<div class="app-pad" style="text-align:center"><div class="big-ok">柜门已弹开</div>' + bar + door("open") + info +
+        '<div class="faint tiny mt12">请确保柜门完全打开，放入物品后关闭柜门</div>' +
+        '<button class="btn btn-primary mt16" id="closeGo" style="width:100%">物品已放入，关闭柜门</button>' +
+        '<button class="btn mt8" id="openFail2" style="width:100%">柜门异常？上报并换柜</button></div>';
+    case 3:
+      return '<div class="app-pad" style="text-align:center"><div class="h2">正在关闭柜门…</div>' + bar + door("closing") + info +
+        '<button class="btn mt12" id="closeFail" style="width:100%">柜门关不上？上报并换柜</button></div>';
+    default:
+      return '<div class="app-pad" style="text-align:center"><div class="big-ok">✓ 柜门已关闭，存件完成</div>' + bar + door("closed") + info +
+        '<div class="card mt12 faint tiny" style="line-height:1.9">取件码请妥善保管，也可在「订单」中查看。柜机端凭取件码取件。</div>' +
+        '<button class="btn btn-primary mt16" data-action="nav" data-id="u-orders" style="width:100%">查看订单</button></div>';
+  }
+}
+
 routes["u-open"] = function () {
   const o = state.lastOrder;
   if (!o) { go("u-home"); return ""; }
-  return appHeader("存件成功", "u-home") +
-    '<div class="app-pad" style="text-align:center"><div class="big-ok">柜门已弹开</div>' +
-    '<div class="card mt16"><div class="pay-row"><span class="muted">柜格</span><b class="mono">' + esc(o.lockerCode) + "</b></div>" +
-    '<div class="pay-row"><span class="muted">取件码</span><b class="mono" style="font-size:20px;letter-spacing:4px">' + esc(o.code) + "</b></div>" +
-    '<div class="pay-row"><span class="muted">支付金额</span><b>¥' + yuan2(o.paid) + "</b></div>" +
-    '<div class="pay-row" style="border:0"><span class="muted">下单时间</span><b>' + esc(o.startedAt.replace("T", " ").slice(0, 19)) + "</b></div></div>" +
-    '<div class="card mt12 faint tiny" style="line-height:1.9">请放入物品并关好柜门。取件码请妥善保管，也可在「订单」中查看。<br>柜门异常？在订单中可「上报柜格异常」，将全额退款。</div>' +
-    '<button class="btn btn-primary mt16" data-action="nav" data-id="u-orders">查看订单</button></div>';
+  state.openStep = state.openStep || 0;
+  const makeDetail = () => appHeader("存件指引", "u-home") + openStepView(state.openStep, o);
+  const goStep = (n) => {
+    state.openStep = n;
+    const box = $("#app");
+    if (box) { box.innerHTML = makeDetail(); bindStep(); }
+  };
+  const reportSwitch = () => {
+    state.switchCount = (state.switchCount || 0) + 1;
+    const m = String(o.lockerCode || "A-001").match(/^(.*?)(\d+)$/);
+    o.lockerCode = m ? m[1] + (Number(m[2]) + 1) : String(o.lockerCode) + "1";
+    toast("已上报柜门异常，自动切换备用柜格：" + o.lockerCode);
+    goStep(0);
+  };
+  const bindStep = () => {
+    const b1 = $("#openGo"), b2 = $("#closeGo");
+    if (b1) b1.onclick = () => { goStep(1); setTimeout(() => goStep(2), 1200); };
+    if (b2) b2.onclick = () => { goStep(3); setTimeout(() => goStep(4), 1200); };
+    ["#openFail", "#openFail2", "#closeFail"].forEach((sel) => { const b = $(sel); if (b) b.onclick = reportSwitch; });
+  };
+  state._after = bindStep;
+  return makeDetail();
 };
 
 routes["u-orders"] = async function () {
@@ -866,8 +913,7 @@ routes["m-login"] = function () {
   return '<div class="admin-wrap"><div class="admin-login"><div class="admin-logo">Smart-Locker 管理后台</div>' +
     '<input class="input mt16" id="admId" placeholder="账号或手机号">' +
     '<input class="input mt12" id="admPwd" type="password" placeholder="密码">' +
-    '<button class="btn btn-primary mt16" id="admLogin" style="width:100%">登 录</button>' +
-    '<div class="faint tiny mt16" style="line-height:1.8">演示账号（密码 000000）：<br>super 超级管理员 · site_rm 网点管理员 · svc 在线客服</div></div></div>';
+    '<button class="btn btn-primary mt16" id="admLogin" style="width:100%">登 录</button></div></div>';
 };
 document.addEventListener("click", (e) => {
   if (e.target.closest("#admLogin")) {
@@ -1197,8 +1243,7 @@ routes["m-staff"] = async function () {
     staffs.map((s) => "<tr><td class='mono'>" + esc(s.empNo) + "</td><td>" + esc(s.name) + "</td><td>" + esc(s.account) + "</td><td>" + esc(s.phone) + "</td><td>" + roleCn(s.role) + "</td><td>" +
       (s.status === "active" ? '<span class="chip chip-ok">启用</span>' : '<span class="chip chip-err">禁用</span>') + "</td><td>" +
       '<button class="btn sm st-role" data-id="' + s.id + '">改角色</button> <button class="btn sm st-pwd" data-id="' + s.id + '">重置密码</button> <button class="btn sm st-toggle" data-id="' + s.id + '" data-st="' + s.status + '">' + (s.status === "active" ? "禁用" : "启用") + "</button></td></tr>").join("") +
-    "</tbody></table>" +
-    '<div class="card mt16 faint tiny">修改角色/重置密码/禁用后，该员工登录态立即失效，需重新登录</div>');
+    "</tbody></table>");
 };
 
 /* ============ 客服工作台：微信式双栏（会话列表 + 聊天窗） ============ */
