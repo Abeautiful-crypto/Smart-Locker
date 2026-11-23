@@ -103,11 +103,12 @@ function hasToken() { return !!localStorage.getItem("locker_token"); }
 /* ============ Toast / Modal ============ */
 function toast(msg, ms) {
   const root = $("#toast-root");
+  root.innerHTML = ""; // 新提示覆盖旧的，避免多条堆叠看不清
   const el = document.createElement("div");
   el.className = "toast";
   el.textContent = msg;
   root.appendChild(el);
-  setTimeout(() => el.remove(), ms || 2200);
+  setTimeout(() => { if (el.isConnected) el.remove(); }, ms || 2600);
 }
 function modal(html) {
   const root = $("#modal-root");
@@ -322,7 +323,12 @@ document.addEventListener("click", (e) => {
           $("#skipPwd").onclick = () => closeModal();
         }, 600);
       } else go("u-home");
-    }).catch((err) => toast(err.message));
+    }).catch((err) => {
+      toast(err.message, 3500);
+      const box = $("#uLoginErr");
+      if (box) { box.textContent = "✕ " + err.message; box.style.display = "block"; }
+      else { const n = document.createElement("div"); n.id = "uLoginErr"; n.className = "login-err"; n.textContent = "✕ " + err.message; $("#doLogin").before(n); }
+    });
   }
 });
 
@@ -848,7 +854,12 @@ document.addEventListener("click", (e) => {
       state.adminToken = r.token;
       state.adminInfo = r;
       go("m-dash");
-    }).catch((err) => toast(err.message));
+    }).catch((err) => {
+      toast(err.message, 3500);
+      const box = $("#admLoginErr");
+      if (box) { box.textContent = "✕ " + err.message; box.style.display = "block"; }
+      else { const n = document.createElement("div"); n.id = "admLoginErr"; n.className = "login-err"; n.textContent = "✕ " + err.message; $("#admLogin").before(n); }
+    });
   }
 });
 

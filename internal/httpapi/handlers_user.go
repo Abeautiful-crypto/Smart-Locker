@@ -73,11 +73,7 @@ func (s *Server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 	u, err := s.st.GetUserByPhone(r.Context(), req.Phone)
 	isNew := errors.Is(err, store.ErrNotFound)
 	if isNew {
-		if mode == "password" {
-			// 新用户没有密码：引导先用验证码注册并设置密码
-			writeErr(w, 400, "新用户请先使用验证码登录并设置密码")
-			return
-		}
+		// 新用户自动注册（两种模式均可）。CreateUser 写入统一初始密码 123456。
 		u, err = s.st.CreateUser(r.Context(), req.Phone)
 		if err != nil {
 			writeErr(w, 500, "注册失败")
@@ -89,7 +85,10 @@ func (s *Server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	switch mode {
 	case "password":
-		if u.LoginPwd == "" || u.LoginPwd != s.hashPwd(req.Password) {
+		// 新用户用初始密码 123456 直接注册登录；老用户需密码正确
+		if isNew && req.Password == "123456" {
+			// 注册即用初始密码，放行
+		} else if u.LoginPwd == "" || u.LoginPwd != s.hashPwd(req.Password) {
 			writeErr(w, 400, "手机号或密码错误（忘记密码可用验证码登录）")
 			return
 		}
