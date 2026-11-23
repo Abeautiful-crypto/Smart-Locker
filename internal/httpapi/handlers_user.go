@@ -266,10 +266,18 @@ func (s *Server) handleOutletDetail(w http.ResponseWriter, r *http.Request) {
 			bySize[l.Size]++
 		}
 	}
+	// 柜格明细（编号+规格+状态），供柜机端/用户端/后台实时展示
+	cabinets := []map[string]any{}
+	for _, l := range lockers {
+		cabinets = append(cabinets, map[string]any{
+			"id": l.ID, "code": l.Code, "size": l.Size, "status": l.Status,
+			"groupId": l.GroupID, "faultSource": l.FaultSource, "problem": l.FaultNote,
+		})
+	}
 	writeJSON(w, 200, map[string]any{
 		"id": o.ID, "name": o.Name, "address": o.Address, "city": o.City, "status": o.Status,
 		"lat": o.Lat, "lng": o.Lng,
-		"groups": groups, "idleBySize": bySize, "byStatus": byStatus,
+		"groups": groups, "idleBySize": bySize, "byStatus": byStatus, "cabinets": cabinets,
 	})
 }
 
@@ -458,6 +466,8 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 		paidFen = deposit
 	}
 	_ = s.st.AddPayment(r.Context(), &store.Payment{OrderNo: order.OrderNo, Kind: req.PayMode, AmountFen: paidFen, Channel: "wechat_mock", Status: "paid"})
+	// 营收流水：收款在支付成功时记 income，结算时只记 refund/extra；净收入=income-refund+extra
+	_ = s.st.AddRevenue(r.Context(), &store.RevenueRecord{OutletID: req.OutletID, GroupID: locker.GroupID, OrderID: order.ID, Kind: "income", AmountFen: paidFen})
 	// 柜格关联订单
 	locker.CurrentOrderID = order.ID
 	_ = s.st.UpdateLocker(r.Context(), locker)
@@ -784,13 +794,12 @@ func (s *Server) settleOrder(r *http.Request, o *store.Order, method string) (*b
 	if settle.RefundFen > 0 {
 		_ = s.st.AddPayment(r.Context(), &store.Payment{OrderNo: o.OrderNo, Kind: "refund", AmountFen: settle.RefundFen, Channel: "wechat_mock", Status: "refunded"})
 	}
-	// 营收流水：预付在收款时未记，这里按净收入记账（income=实收费用，refund=退款）
+	// 营收流水：income 已在支付时按实收记账，这里只记退款与补交
 	lk, _ := s.st.GetLocker(r.Context(), o.LockerID)
 	groupID := int64(0)
 	if lk != nil {
 		groupID = lk.GroupID
 	}
-	_ = s.st.AddRevenue(r.Context(), &store.RevenueRecord{OutletID: o.OutletID, GroupID: groupID, OrderID: o.ID, Kind: "income", AmountFen: settle.FeeFen})
 	if settle.RefundFen > 0 {
 		_ = s.st.AddRevenue(r.Context(), &store.RevenueRecord{OutletID: o.OutletID, GroupID: groupID, OrderID: o.ID, Kind: "refund", AmountFen: settle.RefundFen})
 	}

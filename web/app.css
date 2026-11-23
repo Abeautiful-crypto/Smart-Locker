@@ -258,6 +258,28 @@ img.user-avatar { width: 52px; height: 52px; object-fit: cover; border-radius: 1
 .login-tab { flex: 1; padding: 10px 0; border: 2.5px solid var(--ink); border-radius: 9px; background: var(--surface); font-weight: 800; font-size: 14px; cursor: pointer; }
 .login-tab.on { background: var(--pop, #FFC93C); box-shadow: 3px 3px 0 var(--ink); }
 .login-err { margin-top: 10px; padding: 9px 12px; background: #FFE0DD; border: 2px solid #C62F28; border-radius: 8px; color: #A61E18; font-size: 12.5px; font-weight: 800; }
+/* 附近网点地图（Leaflet / 离线示意图） */
+.ol-map { height: 220px; border: 2.5px solid var(--ink); border-radius: 10px; overflow: hidden; background: #E8E0CD; }
+.map-fallback { position: relative; width: 100%; height: 100%; background: repeating-linear-gradient(0deg,#EFE9DA,#EFE9DA 20px,#E8E0CD 20px,#E8E0CD 40px); display: grid; place-items: center; }
+.map-fallback > b { font-size: 13px; }
+.map-fallback > .faint { position: absolute; bottom: 8px; }
+.map-fallback-pins .pin { position: absolute; background: var(--pop, #FFC93C); border: 2px solid var(--ink); border-radius: 12px; padding: 3px 8px; font-size: 11px; font-weight: 800; }
+.leaflet-container { font-family: inherit; }
+
+/* 柜格实时状态网格（三端共用） */
+.cab-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+.cab-cell { aspect-ratio: 1; border: 2.5px solid var(--ink); border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: default; font-size: 11px; }
+.cab-cell b { font-size: 13px; }
+.cab-cell span { font-size: 9px; opacity: .75; }
+.cab-cell.free { background: #C8EAD4; }
+.cab-cell.used { background: #DDD8C8; }
+.cab-cell.err { background: #FF8A65; }
+.cab-cell[data-lid]:hover { transform: translate(-2px,-2px); box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
+.cab-legend { display: flex; gap: 16px; margin-top: 12px; font-size: 11px; color: var(--muted); }
+.cab-legend i { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--ink); border-radius: 3px; margin-right: 4px; vertical-align: -2px; }
+.cab-legend i.free { background: #C8EAD4; } .cab-legend i.used { background: #DDD8C8; } .cab-legend i.err { background: #FF8A65; }
+@media(max-width: 500px) { .cab-grid { grid-template-columns: repeat(6, 1fr); } }
+
 /* 存件指引：步骤条 + 柜门开合动画 */
 .step-bar { display: flex; justify-content: center; gap: 6px; margin: 16px 0 4px; }
 .step { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--ink); display: grid; place-items: center; font-size: 12px; font-weight: 800; background: var(--surface); }

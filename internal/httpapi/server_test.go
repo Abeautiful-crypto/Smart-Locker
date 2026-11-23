@@ -828,8 +828,10 @@ func TestDashboardAndRevenue(t *testing.T) {
 	}
 	income, _ := dash["income"].(float64)
 	refund, _ := dash["refund"].(float64)
-	if income != 0 || refund != 1500 {
-		t.Fatalf("免费订单收款0退款1500: %v", dash)
+	revenue, _ := dash["revenue"].(float64)
+	// 正确记账口径：支付时记收款=预付1500，结算时记退款1500，净收入=0（不再出现负数）
+	if income != 1500 || refund != 1500 || revenue != 0 {
+		t.Fatalf("免费订单应收款1500退款1500净收入0: %v", dash)
 	}
 	trend, _ := dash["trend"].([]any)
 	if len(trend) != 7 {
@@ -840,8 +842,8 @@ func TestDashboardAndRevenue(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("营收失败: %v", rev)
 	}
-	if total, _ := rev["total"].(float64); total != -1500 {
-		t.Fatalf("净营收应为-1500(退款): %v", rev)
+	if total, _ := rev["total"].(float64); total != 0 {
+		t.Fatalf("免费订单净营收应为0(收款1500-退款1500): %v", rev)
 	}
 	// 网点维度
 	code, _ = call(t, ts, "GET", "/api/admin/revenue?dim=outlet", superTk, nil)
