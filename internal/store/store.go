@@ -280,6 +280,7 @@ type Store interface {
 	ListCouponDefs(ctx context.Context) ([]*CouponDef, error)
 	SetCouponEnabled(ctx context.Context, id int64, enabled bool) error
 	CreateCouponInstance(ctx context.Context, ci *CouponInstance) error
+	ClaimCoupon(ctx context.Context, defID, userID int64) (*CouponInstance, error) // 领券：原子扣库存+每人限一张
 	GetCouponInstance(ctx context.Context, id int64) (*CouponInstance, error)
 	ListUserCoupons(ctx context.Context, userID int64) ([]*CouponInstance, error)
 	UseCouponInstance(ctx context.Context, id, orderID int64) error

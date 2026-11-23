@@ -559,6 +559,27 @@ func (m *MemStore) CreateCouponInstance(_ context.Context, ci *CouponInstance) e
 	return nil
 }
 
+func (m *MemStore) ClaimCoupon(_ context.Context, defID, userID int64) (*CouponInstance, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.couponDefs[defID]
+	if !ok || !d.Enabled {
+		return nil, ErrNotFound
+	}
+	if d.UsedCount >= d.TotalCount {
+		return nil, ErrConflict // 库存已抢完
+	}
+	for _, ci := range m.couponIns {
+		if ci.DefID == defID && ci.UserID == userID {
+			return nil, ErrConflict // 每人限领一张
+		}
+	}
+	ci := &CouponInstance{ID: m.nextID(), DefID: defID, UserID: userID, Status: "usable"}
+	m.couponIns[ci.ID] = ci
+	d.UsedCount++
+	return cloneCouponInstance(ci, m.couponDefs), nil
+}
+
 func (m *MemStore) GetCouponInstance(_ context.Context, id int64) (*CouponInstance, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

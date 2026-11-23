@@ -207,6 +207,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/user/avatar", s.handleSetAvatar)
 	mux.HandleFunc("POST /api/user/login-pwd", s.handleSetLoginPwd)
 	mux.HandleFunc("GET /api/user/coupons", s.handleUserCoupons)
+	mux.HandleFunc("GET /api/user/coupons/available", s.handleAvailableCoupons)
+	mux.HandleFunc("POST /api/user/coupons/{id}/claim", s.handleClaimCoupon)
 	mux.HandleFunc("POST /api/user/logout", s.handleUserLogout)
 
 	// 网点（公开）

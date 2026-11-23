@@ -963,6 +963,85 @@ func (s *Server) handleUserCoupons(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"usable": usable, "expired": expired})
 }
 
+// handleAvailableCoupons 领券中心：展示在售券（启用+有效期内）与剩余库存
+func (s *Server) handleAvailableCoupons(w http.ResponseWriter, r *http.Request) {
+	claims, ok := s.userAuthWrap(w, r)
+	if !ok {
+		return
+	}
+	defs, err := s.st.ListCouponDefs(r.Context())
+	if err != nil {
+		writeErr(w, 500, "查询失败")
+		return
+	}
+	now := time.Now()
+	mine, _ := s.st.ListUserCoupons(r.Context(), claims.refID)
+	claimed := map[int64]bool{}
+	for _, ci := range mine {
+		claimed[ci.DefID] = true
+	}
+	out := []map[string]any{}
+	for _, d := range defs {
+		if !d.Enabled || now.Before(d.ValidFrom) || now.After(d.ValidTo) {
+			continue
+		}
+		left := d.TotalCount - d.UsedCount
+		if left < 0 {
+			left = 0
+		}
+		name, valDesc := couponDefDisplay(d)
+		out = append(out, map[string]any{
+			"id": d.ID, "name": name, "valueDesc": valDesc, "type": d.Ctype,
+			"validTo": d.ValidTo.Format("2006-01-02"), "left": left, "total": d.TotalCount,
+			"claimed": claimed[d.ID], "soldOut": left <= 0,
+		})
+	}
+	writeJSON(w, 200, map[string]any{"coupons": out})
+}
+
+// couponDefDisplay 券定义展示文案
+func couponDefDisplay(d *store.CouponDef) (string, string) {
+	switch d.Ctype {
+	case biz.CouponDiscount:
+		return d.Name, fmtFrac(d.Value)
+	case biz.CouponHour:
+		return d.Name, fmtMinutes(d.Value)
+	case biz.CouponAmount:
+		return d.Name, fmtFen(d.Value)
+	}
+	return d.Name, "-"
+}
+
+// handleClaimCoupon 领券：每人限一张，库存为 0 停售（store 层原子保证）
+func (s *Server) handleClaimCoupon(w http.ResponseWriter, r *http.Request) {
+	claims, ok := s.userAuthWrap(w, r)
+	if !ok {
+		return
+	}
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeErr(w, 400, "参数错误")
+		return
+	}
+	ci, err := s.st.ClaimCoupon(r.Context(), id, claims.refID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, 404, "优惠券不存在或已停售")
+		} else {
+			writeErr(w, 400, "已领取过或库存不足，无法领取")
+		}
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": ci.ID, "name": couponDefName(ci), "note": "领取成功"})
+}
+
+func couponDefName(ci *store.CouponInstance) string {
+	if ci.Def != nil {
+		return ci.Def.Name
+	}
+	return "优惠券"
+}
+
 // ---------- 在线客服 ----------
 
 func (s *Server) handleChatState(w http.ResponseWriter, r *http.Request) {

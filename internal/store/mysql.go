@@ -753,6 +753,41 @@ func (s *MySQLStore) CreateCouponInstance(ctx context.Context, ci *CouponInstanc
 	return nil
 }
 
+// ClaimCoupon 原子领券：事务内先扣库存（WHERE used_count<total_count），再插入实例。
+// 任一条件不满足（库存抢完/重复领取/停用）均回滚并返回 ErrConflict。
+func (s *MySQLStore) ClaimCoupon(ctx context.Context, defID, userID int64) (*CouponInstance, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	// 1) 条件扣库存：并发安全，库存为 0 时 RowsAffected=0
+	res, err := tx.ExecContext(ctx,
+		"UPDATE coupon_defs SET used_count=used_count+1 WHERE id=? AND enabled=1 AND used_count<total_count AND CURDATE() BETWEEN valid_from AND valid_to", defID)
+	if err != nil {
+		return nil, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return nil, ErrConflict // 抢完/停用/不在有效期
+	}
+
+	// 2) 插入实例（唯一索引防重复领）
+	ins, err := tx.ExecContext(ctx, "INSERT INTO coupon_instances(def_id,user_id,status) VALUES(?,?,'usable')", defID, userID)
+	if err != nil {
+		if isDup(err) {
+			return nil, ErrConflict // 每人限一张
+		}
+		return nil, err
+	}
+	id, _ := ins.LastInsertId()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &CouponInstance{ID: id, DefID: defID, UserID: userID, Status: "usable"}, nil
+}
+
 const couponInstCols = "ci.id,ci.def_id,ci.user_id,ci.status,IFNULL(ci.used_order_id,0),ci.created_at,d.id,d.name,d.ctype,d.value,d.scope,IFNULL(d.outlet_id,0),d.valid_from,d.valid_to,d.enabled,d.total_count,d.used_count,d.note,d.created_at"
 
 func scanCouponInstances(rows *sql.Rows) ([]*CouponInstance, error) {

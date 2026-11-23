@@ -626,13 +626,32 @@ document.addEventListener("click", (e) => {
 
 routes["u-coupons"] = async function () {
   if (!requireLogin()) return "";
-  const data = await api("/api/user/coupons").catch(() => ({ usable: [], expired: [] }));
+  const [data, avail] = await Promise.all([
+    api("/api/user/coupons").catch(() => ({ usable: [], expired: [] })),
+    api("/api/user/coupons/available").catch(() => ({ coupons: [] })),
+  ]);
   const card = (c, dead) =>
     '<div class="card cp-card' + (dead ? " dead" : "") + '" style="margin-bottom:10px;opacity:' + (dead ? ".55" : "1") + '"><b>' + esc(c.name) + '</b><span class="chip chip-ok ml8">' + esc(c.type) + "</span>" +
     '<div class="mt5 mono" style="font-weight:700">' + esc(c.valueDesc) + "</div>" +
     '<div class="faint tiny mt5">' + (dead ? "已过期/停用 · " : "") + esc(c.validFrom) + " ~ " + esc(c.validTo) + " · " + (c.scope === "outlet" ? "限指定网点" : "全网点通用") + "</div></div>";
+  const claimCard = (c) =>
+    '<div class="card cp-claim" style="margin-bottom:10px"><div class="row" style="justify-content:space-between"><div><b>' + esc(c.name) + '</b> <span class="chip chip-ok ml8">' + esc(c.valueDesc) + '</span>' +
+    '<div class="faint tiny mt5">有效期至 ' + esc(c.validTo) + ' · 剩余 ' + c.left + '/' + c.total + ' 张</div></div>' +
+    '<button class="btn btn-sm claim-btn" data-id="' + c.id + '" ' + (c.soldOut || c.claimed ? "disabled" : "") + '>' +
+    (c.claimed ? "已领取" : c.soldOut ? "已抢完" : "领取") + '</button></div></div>';
+  state._after = () => {
+    document.querySelectorAll(".claim-btn").forEach((b) => {
+      b.onclick = () => {
+        api("/api/user/coupons/" + b.dataset.id + "/claim", "POST", {}).then((r) => {
+          toast("✓ " + (r.note || "领取成功")); render();
+        }).catch((err) => toast(err.message, 3500));
+      };
+    });
+  };
   return appHeader("优惠券", "u-mine") + '<div class="app-pad">' +
-    '<div class="section-h"><b>可使用</b></div>' + (data.usable.map((c) => card(c, false)).join("") || '<div class="faint tiny">暂无</div>') +
+    '<div class="section-h"><b>领券中心</b></div>' +
+    (avail.coupons.map(claimCard).join("") || '<div class="faint tiny">暂无在售优惠券</div>') +
+    '<div class="section-h mt16"><b>可使用</b></div>' + (data.usable.map((c) => card(c, false)).join("") || '<div class="faint tiny">暂无</div>') +
     '<div class="section-h mt16"><b>已过期</b></div>' + (data.expired.map((c) => card(c, true)).join("") || '<div class="faint tiny">暂无</div>') +
     "</div>" + tabbar("");
 };
