@@ -390,17 +390,19 @@ function outletRow(o) {
 }
 
 let outletMap = null;
-function initOutletMap(outlets) {
+let leafletLoading = false;
+function mapFallback(outlets) {
   const el = $("#olMap");
   if (!el) return;
-  if (typeof L === "undefined" || !outlets.length) {
-    el.innerHTML = '<div class="map-fallback"><b>附近网点分布图</b><div class="map-fallback-pins">' +
-      outlets.slice(0, 6).map((o, i) => '<span class="pin" style="left:' + (18 + (i % 3) * 27) + '%;top:' + (22 + Math.floor(i / 3) * 42) + '%">' + (o.idle || 0) + '格</span>').join("") + '</div><div class="faint tiny">地图服务不可用，显示示意图</div></div>';
-    return;
-  }
-  if (outletMap) { outletMap.remove(); outletMap = null; }
+  el.innerHTML = '<div class="map-fallback"><b>附近网点分布图</b><div class="map-fallback-pins">' +
+    outlets.slice(0, 6).map((o, i) => '<span class="pin" style="left:' + (18 + (i % 3) * 27) + '%;top:' + (22 + Math.floor(i / 3) * 42) + '%">' + (o.idle || 0) + '格</span>').join("") + '</div><div class="faint tiny">地图服务不可用，显示示意图</div></div>';
+}
+function renderLeaflet(outlets) {
+  const el = $("#olMap");
+  if (!el || typeof L === "undefined") { mapFallback(outlets); return; }
   const pts = outlets.filter((o) => o.lat && o.lng);
-  if (!pts.length) return;
+  if (!pts.length) { mapFallback(outlets); return; }
+  if (outletMap) { outletMap.remove(); outletMap = null; }
   outletMap = L.map(el, { zoomControl: false }).setView([pts[0].lat, pts[0].lng], 13);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors", maxZoom: 18,
@@ -411,6 +413,21 @@ function initOutletMap(outlets) {
       .on("click", () => openOutletDetail(o.id));
   });
 }
+function loadLeaflet(outlets) {
+  if (typeof L !== "undefined") { renderLeaflet(outlets); return; }
+  mapFallback(outlets); // 立即显示示意图，CDN 加载成功后再替换
+  if (leafletLoading) return;
+  leafletLoading = true;
+  const css = document.createElement("link");
+  css.rel = "stylesheet"; css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+  document.head.appendChild(css);
+  const js = document.createElement("script");
+  js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+  js.onload = () => { leafletLoading = false; if ($("#olMap")) renderLeaflet(outlets); };
+  js.onerror = () => { leafletLoading = false; }; // 离线静默降级，不打 console error
+  document.head.appendChild(js);
+}
+function initOutletMap(outlets) { if (!outlets.length) { mapFallback(outlets); return; } loadLeaflet(outlets); }
 routes["u-outlets"] = async function () {
   const outlets = await api("/api/outlets?city=" + encodeURIComponent(state.city)).catch(() => []);
   state._after = () => {
