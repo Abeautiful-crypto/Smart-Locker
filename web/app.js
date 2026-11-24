@@ -440,11 +440,20 @@ function renderLeaflet(outlets) {
   const pts = outlets.filter((o) => o.lat && o.lng);
   if (!pts.length) { mapFallback(outlets); return; }
   if (outletMap) { outletMap.remove(); outletMap = null; }
-  outletMap = L.map(el, { zoomControl: false, scrollWheelZoom: false }).setView([pts[0].lat, pts[0].lng], 12);
+  // 缩放/拖动全部开启：缩放控件放右上角避免遮挡网点标签
+  outletMap = L.map(el, {
+    zoomControl: false, scrollWheelZoom: true, doubleClickZoom: true,
+    touchZoom: true, dragging: true, boxZoom: true,
+  }).setView([pts[0].lat, pts[0].lng], 12);
+  L.control.zoom({ position: "topright" }).addTo(outletMap);
+  // 瓦片加载失败时用网格占位图，避免灰块难看
+  const gridTile = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect width="256" height="256" fill="#F0EEE6"/><path d="M0 0H256M0 64H256M0 128H256M0 192H256M0 0V256M64 0V256M128 0V256M192 0V256" stroke="#DDD8C8" stroke-width="1"/></svg>');
   const tiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors", maxZoom: 18,
+    errorTileUrl: gridTile, crossOrigin: true,
   }).addTo(outletMap);
-  // 视野自动覆盖全部网点（留边距），避免只显示一小片区域
+  // 视野自动覆盖全部网点（留边距），之后用户可自由缩放拖动
   const bounds = L.latLngBounds(pts.map((o) => [o.lat, o.lng]));
   outletMap.fitBounds(bounds.pad(0.25), { padding: [36, 36], maxZoom: 14 });
   setTimeout(() => { if (outletMap) outletMap.invalidateSize(); }, 100);
