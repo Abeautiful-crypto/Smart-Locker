@@ -38,7 +38,7 @@
 /* 显式覆盖 proto.css @layer 中的 opacity:0/pointer-events:none，
    否则弹窗透明且不可点击（用户反馈"设置弹窗点了没反应"的根因） */
 .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 900; display: grid; place-items: center; padding: 20px; opacity: 1; pointer-events: auto; }
-.modal-box { background: #fff; border: 2px solid #111; border-radius: 14px; padding: 18px; width: 100%; max-width: 360px; box-shadow: 6px 6px 0 rgba(17,17,17,.9); }
+.modal-box { background: #fff; border: 2px solid #111; border-radius: 14px; padding: 18px; width: 100%; max-width: 420px; max-height: 88vh; overflow-y: auto; overscroll-behavior: contain; box-shadow: 6px 6px 0 rgba(17,17,17,.9); }
 .big-ok { font-size: 18px; font-weight: 800; color: #177245; margin-top: 10px; }
 
 /* 手机容器 */
@@ -263,7 +263,8 @@ img.user-avatar { width: 52px; height: 52px; object-fit: cover; border-radius: 1
 .login-tab.on { background: var(--pop, #FFC93C); box-shadow: 3px 3px 0 var(--ink); }
 .login-err { margin-top: 10px; padding: 9px 12px; background: #FFE0DD; border: 2px solid #C62F28; border-radius: 8px; color: #A61E18; font-size: 12.5px; font-weight: 800; }
 /* 附近网点地图（Leaflet / 离线示意图） */
-.ol-map { height: 220px; border: 2.5px solid var(--ink); border-radius: 10px; overflow: hidden; background: #E8E0CD; }
+.ol-map { height: 260px; width: 100%; border: 2.5px solid var(--ink); border-radius: 10px; overflow: hidden; background: #E8E0CD; position: relative; }
+.ol-map .leaflet-container { width: 100%; height: 100%; }
 .map-fallback { position: relative; width: 100%; height: 100%; background: repeating-linear-gradient(0deg,#EFE9DA,#EFE9DA 20px,#E8E0CD 20px,#E8E0CD 40px); display: grid; place-items: center; }
 .map-fallback > b { font-size: 13px; }
 .map-fallback > .faint { position: absolute; bottom: 8px; }

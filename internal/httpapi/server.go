@@ -26,7 +26,6 @@ type Server struct {
 	dutyOverride *bool // 客服工作台"模拟下班"开关；nil 表示按工作时间自动判定
 }
 
-// New 创建服务器
 func New(st store.Store) *Server { return &Server{st: st} }
 
 // StaffClaims 员工会话信息

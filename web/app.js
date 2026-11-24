@@ -440,16 +440,20 @@ function renderLeaflet(outlets) {
   const pts = outlets.filter((o) => o.lat && o.lng);
   if (!pts.length) { mapFallback(outlets); return; }
   if (outletMap) { outletMap.remove(); outletMap = null; }
-  outletMap = L.map(el, { zoomControl: false }).setView([pts[0].lat, pts[0].lng], 13);
+  outletMap = L.map(el, { zoomControl: false, scrollWheelZoom: false }).setView([pts[0].lat, pts[0].lng], 12);
   const tiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors", maxZoom: 18,
   }).addTo(outletMap);
-  // 瓦片加载失败检测：3 秒内没有任何瓦片 load 就切换本地示意图
+  // 视野自动覆盖全部网点（留边距），避免只显示一小片区域
+  const bounds = L.latLngBounds(pts.map((o) => [o.lat, o.lng]));
+  outletMap.fitBounds(bounds.pad(0.25), { padding: [36, 36], maxZoom: 14 });
+  setTimeout(() => { if (outletMap) outletMap.invalidateSize(); }, 100);
+  // 瓦片加载失败检测：4 秒内没有任何瓦片 load 就切换本地示意图
   let tileOK = false;
   tiles.on("tileload", () => { tileOK = true; });
   setTimeout(() => {
     if (!tileOK && outletMap && $("#olMap")) { outletMap.remove(); outletMap = null; mapFallback(outlets); }
-  }, 3000);
+  }, 4000);
   pts.forEach((o) => {
     // 带名称的常驻标签，明确标注是哪个寄存点
     const icon = L.divIcon({
@@ -1521,7 +1525,6 @@ routes["m-cs"] = async function () {
   state._beforeRender = () => csStopRealtime();
   return adminShell("m-cs",
     '<div class="row" style="justify-content:space-between"><div class="h2">客服工作台</div>' +
-    '<span class="tiny faint">实时通道：WebSocket + HTTP轮询兜底</span>' +
     '<button class="btn ' + (duty.duty ? "btn-primary" : "") + '" id="dutyBtn">' + (duty.duty ? "模拟下班" : "模拟上班") + '</button></div>' +
     '<div class="wx-shell mt16">' +
     '<div class="wx-sidebar"><div class="wx-sidebar-head">消息</div><div id="csContactList" class="wx-contact-list"></div>' +
